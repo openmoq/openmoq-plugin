@@ -1,6 +1,6 @@
 #pragma once
 
-#include <moq/codec_string.h>
+#include <moq/codec_signaling.h>
 #include <string>
 #include <vector>
 
