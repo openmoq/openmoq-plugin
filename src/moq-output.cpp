@@ -372,8 +372,8 @@ void MOQOutput::Stop(bool signal)
 	start_time_ns = os_gettime_ns();
 }
 
-void MOQOutput::SendPacket(struct encoder_packet *packet, moq_media_track_t **track, bool is_sync,
-			   bool starts_group, bool ends_group)
+void MOQOutput::SendPacket(struct encoder_packet *packet, moq_media_track_t **track, bool is_sync, bool starts_group,
+			   bool ends_group)
 {
 
 	moq_rcbuf_t *payload = nullptr;
