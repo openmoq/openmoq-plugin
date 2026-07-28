@@ -3,8 +3,8 @@
 #include <cstring>
 #include <obs.hpp>
 
-const char *audio_codecs[] = {"aac", nullptr};
-const char *video_codecs[] = {"h264", "h265", nullptr};
+const char *audio_codecs[] = {"aac", "opus", nullptr};
+const char *video_codecs[] = {"h264", "hevc", nullptr};
 
 MOQService::MOQService(obs_data_t *settings, obs_service_t *service)
 {
