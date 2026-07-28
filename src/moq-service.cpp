@@ -4,7 +4,7 @@
 #include <obs.hpp>
 
 const char *audio_codecs[] = {"aac", "opus", nullptr};
-const char *video_codecs[] = {"h264", "hevc", nullptr};
+const char *video_codecs[] = {"h264", "hevc", "av1", nullptr};
 
 MOQService::MOQService(obs_data_t *settings, obs_service_t *service)
 {

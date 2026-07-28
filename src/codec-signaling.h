@@ -18,6 +18,7 @@ struct TrackCodec {
 
 inline constexpr TrackCodec kCodecH264{MOQ_CODEC_SOURCE_AVC_ANNEXB, MOQ_CODEC_CONFIG_AVCC, "avc1", false, 0x00};
 inline constexpr TrackCodec kCodecH265{MOQ_CODEC_SOURCE_HEVC_ANNEXB, MOQ_CODEC_CONFIG_HVCC, "hvc1", false, 0x00};
+inline constexpr TrackCodec kCodecAv1{MOQ_CODEC_SOURCE_AV1_OBU, MOQ_CODEC_CONFIG_AV1C, "av01", false, 0x00};
 inline constexpr TrackCodec kCodecAac{MOQ_CODEC_SOURCE_AAC_ASC, MOQ_CODEC_CONFIG_AAC_ASC, "mp4a", true, 0x40};
 inline constexpr TrackCodec kCodecOpus{MOQ_CODEC_SOURCE_OPUS_HEAD, MOQ_CODEC_CONFIG_OPUS, "opus", false, 0x00};
 
@@ -30,6 +31,8 @@ inline const TrackCodec *ResolveTrackCodec(const char *codec)
 		return &kCodecH264;
 	if (strcmp(codec, "hevc") == 0)
 		return &kCodecH265;
+	if (strcmp(codec, "av1") == 0)
+		return &kCodecAv1;
 	if (strcmp(codec, "aac") == 0)
 		return &kCodecAac;
 	if (strcmp(codec, "opus") == 0)
