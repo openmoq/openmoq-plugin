@@ -472,12 +472,9 @@ void register_moq_output()
 {
 	struct obs_output_info info = {};
 	info.id = "moq_output";
-	// todo: change to OBS_OUTPUT_AV when audio is supported
 	info.flags = OBS_OUTPUT_AV | OBS_OUTPUT_ENCODED | OBS_OUTPUT_SERVICE;
 	info.protocols = "MOQ";
-	// todo: add support for av1
-	info.encoded_video_codecs = "h264;hevc";
-	// todo: add support for ac3
+	info.encoded_video_codecs = "h264;hevc;av1";
 	info.encoded_audio_codecs = "aac;opus";
 
 	info.get_name = [](void *) -> const char * {
