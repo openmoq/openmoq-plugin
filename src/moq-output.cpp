@@ -477,8 +477,8 @@ void register_moq_output()
 	info.protocols = "MOQ";
 	// todo: add support for av1
 	info.encoded_video_codecs = "h264;hevc";
-	// todo: add support for opus and ac3
-	info.encoded_audio_codecs = "aac,opus";
+	// todo: add support for ac3
+	info.encoded_audio_codecs = "aac;opus";
 
 	info.get_name = [](void *) -> const char * {
 		return obs_module_text("Output.Name");
