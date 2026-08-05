@@ -16,7 +16,8 @@ void MOQService::Update(obs_data_t *settings)
 	server = obs_data_get_string(settings, "server");
 	// todo: verify that this is the correct key for the namespace
 	moq_namespace = obs_data_get_string(settings, "key");
-	blog(LOG_INFO, "[obs-moq] service updated: server='%s' namespace='%s'", server.c_str(), moq_namespace.c_str());
+	blog(LOG_DEBUG, "[obs-moq] service updated: server='%s' namespace='%s'", server.c_str(),
+	     moq_namespace.c_str());
 }
 
 obs_properties_t *MOQService::Properties()
@@ -32,7 +33,6 @@ obs_properties_t *MOQService::Properties()
 // todo: validate if we need custom encoder settings
 void MOQService::ApplyEncoderSettings(obs_data_t *video_settings, obs_data_t *audio_settings)
 {
-	blog(LOG_INFO, "[obs-moq] apply encoder settings");
 	if (video_settings) {
 		obs_data_set_int(video_settings, "bf", 0);
 		//todo: check if this is needed
