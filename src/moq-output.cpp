@@ -1,5 +1,5 @@
 #include "moq-output.h"
-#include "utils.h"
+#include "codec-signaling.h"
 
 #include <util/platform.h>
 #include <obs.hpp>
@@ -67,8 +67,8 @@ bool MOQOutput::LoadVideoEncoderSettings()
 	size_t extra_size = 0;
 	obs_encoder_get_extra_data(venc, &extra, &extra_size);
 
-	video_init_data = AnnexBToAvcC(extra, extra_size);
-	video_codec = AvcCodecString(video_init_data);
+	video_init_data = BuildInitData(codec, extra, extra_size);
+	video_codec = BuildCodecString(codec, video_init_data);
 	return true;
 }
 
@@ -89,17 +89,12 @@ bool MOQOutput::LoadAudioEncoderSettings()
 
 	const char *codec = obs_encoder_get_codec(aenc);
 	//todo: add codec validation here
+
 	uint8_t *extra = nullptr;
 	size_t extra_size = 0;
 	obs_encoder_get_extra_data(aenc, &extra, &extra_size);
-
-	if (codec && strcmp(codec, "opus") == 0) {
-		audio_init_data.clear();
-		audio_codec = "opus";
-	} else {
-		audio_init_data.assign(extra, extra + extra_size);
-		audio_codec = AacCodecString(audio_init_data);
-	}
+	audio_init_data = BuildInitData(codec, extra, extra_size);
+	audio_codec = BuildCodecString(codec, audio_init_data);
 
 	return true;
 }
@@ -172,13 +167,16 @@ moq_media_track_t *MOQOutput::CreateVideoTrack(moq_media_sender_t *new_sender)
 
 moq_media_track_t *MOQOutput::CreateVideoTrackFromPacket(moq_media_sender_t *cur_sender, struct encoder_packet *packet)
 {
-	std::vector<uint8_t> init = AnnexBToAvcC(packet->data, packet->size);
+	obs_encoder_t *venc = obs_output_get_video_encoder(output);
+	const char *codec = venc ? obs_encoder_get_codec(venc) : nullptr;
+
+	std::vector<uint8_t> init = BuildInitData(codec, packet->data, packet->size);
 	if (init.empty()) {
 		return nullptr;
 	}
 
 	video_init_data = std::move(init);
-	video_codec = AvcCodecString(video_init_data);
+	video_codec = BuildCodecString(codec, video_init_data);
 
 	moq_media_track_t *new_track = CreateVideoTrack(cur_sender);
 	if (!new_track) {
@@ -377,8 +375,8 @@ void MOQOutput::Stop(bool signal)
 	start_time_ns = os_gettime_ns();
 }
 
-void MOQOutput::SendPacket(struct encoder_packet *packet, moq_media_track_t **track, bool is_sync, bool starts_group,
-			   bool ends_group)
+void MOQOutput::SendPacket(struct encoder_packet *packet, moq_media_track_t **track, bool is_sync,
+			   bool starts_group, bool ends_group)
 {
 
 	moq_rcbuf_t *payload = nullptr;
@@ -473,13 +471,10 @@ void register_moq_output()
 {
 	struct obs_output_info info = {};
 	info.id = "moq_output";
-	// todo: change to OBS_OUTPUT_AV when audio is supported
 	info.flags = OBS_OUTPUT_AV | OBS_OUTPUT_ENCODED | OBS_OUTPUT_SERVICE;
 	info.protocols = "MOQ";
-	// todo: add support for hevc and av1
-	info.encoded_video_codecs = "h264";
-	// todo: add support for opus and ac3
-	info.encoded_audio_codecs = "aac,opus";
+	info.encoded_video_codecs = "h264;hevc;av1";
+	info.encoded_audio_codecs = "aac;opus";
 
 	info.get_name = [](void *) -> const char * {
 		return obs_module_text("Output.Name");

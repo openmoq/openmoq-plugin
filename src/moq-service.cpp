@@ -4,7 +4,7 @@
 #include <obs.hpp>
 
 const char *audio_codecs[] = {"aac", "opus", nullptr};
-const char *video_codecs[] = {"h264", nullptr};
+const char *video_codecs[] = {"h264", "hevc", "av1", nullptr};
 
 MOQService::MOQService(obs_data_t *settings, obs_service_t *service)
 {
@@ -35,6 +35,7 @@ void MOQService::ApplyEncoderSettings(obs_data_t *video_settings, obs_data_t *au
 	blog(LOG_INFO, "[obs-moq] apply encoder settings");
 	if (video_settings) {
 		obs_data_set_int(video_settings, "bf", 0);
+		obs_data_set_bool(video_settings, "bframes", false);
 		//todo: check if this is needed
 		obs_data_set_bool(video_settings, "repeat_headers", true);
 		obs_data_set_int(video_settings, "keyint_sec", 2);
