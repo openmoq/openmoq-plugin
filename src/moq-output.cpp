@@ -261,13 +261,13 @@ bool MOQOutput::Connect()
 	ecfg.versions.version_count = 1;
 
 	moq_media_sender_cfg_t scfg;
-	moq_media_sender_cfg_init_live(&scfg);
+	moq_media_sender_cfg_init_live_sized(&scfg, sizeof(scfg));
 	scfg.endpoint = &ecfg;
 	scfg.namespace_ = namespace_val;
 	scfg.publish_tracks = true;
 	scfg.drop_without_demand = true;
 
-	moq_media_sender_callbacks_init(&scfg.callbacks);
+	moq_media_sender_callbacks_init_sized(&scfg.callbacks, sizeof(scfg.callbacks));
 	scfg.callbacks.ctx = this;
 	scfg.callbacks.on_ready = &MOQOutput::OnReady;
 	scfg.callbacks.on_closed = &MOQOutput::OnClosed;
