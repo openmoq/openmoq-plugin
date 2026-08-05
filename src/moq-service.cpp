@@ -29,12 +29,18 @@ obs_properties_t *MOQService::Properties()
 	return ppts;
 }
 
+static void disable_bframes(obs_data_t *video_settings)
+{
+	obs_data_set_int(video_settings, "bf", 0);
+	obs_data_set_bool(video_settings, "bframes", false);
+}
+
 // todo: validate if we need custom encoder settings
 void MOQService::ApplyEncoderSettings(obs_data_t *video_settings, obs_data_t *audio_settings)
 {
 	blog(LOG_INFO, "[obs-moq] apply encoder settings");
 	if (video_settings) {
-		obs_data_set_int(video_settings, "bf", 0);
+		disable_bframes(video_settings);
 		//todo: check if this is needed
 		obs_data_set_bool(video_settings, "repeat_headers", true);
 		obs_data_set_int(video_settings, "keyint_sec", 2);
@@ -51,11 +57,13 @@ bool MOQService::Initialize(obs_output_t *output)
 	if (!enc_id)
 		return true;
 
-	if (strcmp(enc_id, "obs_x264") == 0) {
-		OBSDataAutoRelease tune = obs_data_create();
-		obs_data_set_string(tune, "tune", "zerolatency");
-		obs_encoder_update(venc, tune);
-	}
+	OBSDataAutoRelease overrides = obs_data_create();
+	disable_bframes(overrides);
+
+	if (strcmp(enc_id, "obs_x264") == 0)
+		obs_data_set_string(overrides, "tune", "zerolatency");
+
+	obs_encoder_update(venc, overrides);
 
 	return true;
 }
