@@ -5,6 +5,7 @@
 #include <obs.hpp>
 
 #define VIDEO_TIMESCALE 1000000u
+#define MOQ_HANDSHAKE_TIMEOUT_US 5000000ull
 
 MOQOutput::MOQOutput(obs_data_t *settings, obs_output_t *output) : output(output)
 {
@@ -250,11 +251,12 @@ void MOQOutput::OnTrackClosed(void *ctx, moq_media_sender_t *sender, moq_media_t
 bool MOQOutput::Connect()
 {
 	moq_endpoint_cfg_t ecfg;
-	moq_endpoint_cfg_init(&ecfg);
+	moq_endpoint_cfg_init_sized(&ecfg, sizeof(ecfg));
 	ecfg.url.data = (const uint8_t *)url.c_str();
 	ecfg.url.len = url.size();
 	//todo: dynamically resolve from config
 	ecfg.insecure_skip_verify = true;
+	ecfg.handshake_timeout_us = MOQ_HANDSHAKE_TIMEOUT_US;
 
 	//todo: revisit if we want to set the version policy to exact or leave it auto
 	static const moq_version_t kVersions[] = {MOQ_VERSION_DRAFT_16};
