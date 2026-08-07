@@ -19,7 +19,11 @@ find_package(libobs REQUIRED)
 target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE OBS::libobs)
 
 find_package(libmoq REQUIRED COMPONENTS service)
-target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE moq::service moq::codec-signaling)
+
+target_link_libraries(
+  ${CMAKE_PROJECT_NAME}
+  PRIVATE moq::service moq::codec-signaling moq::cmaf-packager
+)
 
 if(ENABLE_FRONTEND_API)
   find_package(obs-frontend-api REQUIRED)
@@ -44,6 +48,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
   src/moq-output.cpp
   src/moq-output.h
   src/codec-signaling.h
+  src/moq-cmaf.h
   src/moq-service.cpp
   src/moq-service.h
 )
