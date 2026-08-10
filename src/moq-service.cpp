@@ -16,8 +16,7 @@ void MOQService::Update(obs_data_t *settings)
 	server = obs_data_get_string(settings, "server");
 	// todo: verify that this is the correct key for the namespace
 	moq_namespace = obs_data_get_string(settings, "key");
-	blog(LOG_DEBUG, "[obs-moq] service updated: server='%s' namespace='%s'", server.c_str(),
-	     moq_namespace.c_str());
+	blog(LOG_DEBUG, "[obs-moq] service updated: server='%s' namespace='%s'", server.c_str(), moq_namespace.c_str());
 }
 
 obs_properties_t *MOQService::Properties()

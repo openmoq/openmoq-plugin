@@ -22,7 +22,6 @@ inline constexpr TrackCodec kCodecAv1{MOQ_CODEC_SOURCE_AV1_OBU, MOQ_CODEC_CONFIG
 inline constexpr TrackCodec kCodecAac{MOQ_CODEC_SOURCE_AAC_ASC, MOQ_CODEC_CONFIG_AAC_ASC, "mp4a", true, 0x40};
 inline constexpr TrackCodec kCodecOpus{MOQ_CODEC_SOURCE_OPUS_HEAD, MOQ_CODEC_CONFIG_OPUS, "opus", false, 0x00};
 
-
 inline const TrackCodec *ResolveTrackCodec(const char *codec)
 {
 	if (!codec)
