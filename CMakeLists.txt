@@ -39,13 +39,15 @@ if(ENABLE_QT)
   )
 endif()
 
-target_sources(${CMAKE_PROJECT_NAME} PRIVATE
-  src/obs-moq.cpp
-  src/moq-output.cpp
-  src/moq-output.h
-  src/codec-signaling.h
-  src/moq-service.cpp
-  src/moq-service.h
+target_sources(
+  ${CMAKE_PROJECT_NAME}
+  PRIVATE
+    src/obs-moq.cpp
+    src/moq-output.cpp
+    src/moq-output.h
+    src/codec-signaling.h
+    src/moq-service.cpp
+    src/moq-service.h
 )
 
 set_target_properties_plugin(${CMAKE_PROJECT_NAME} PROPERTIES OUTPUT_NAME ${_name})
