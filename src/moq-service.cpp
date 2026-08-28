@@ -62,6 +62,10 @@ bool MOQService::Initialize(obs_output_t *output)
 	if (strcmp(enc_id, "obs_x264") == 0)
 		obs_data_set_string(overrides, "tune", "zerolatency");
 
+	static constexpr char kVTEncoderIdPrefix[] = "com.apple.videotoolbox.videoencoder.";
+	if (strncmp(enc_id, kVTEncoderIdPrefix, sizeof(kVTEncoderIdPrefix) - 1) == 0)
+		obs_data_set_bool(overrides, "low_latency", true);
+
 	obs_encoder_update(venc, overrides);
 
 	return true;
