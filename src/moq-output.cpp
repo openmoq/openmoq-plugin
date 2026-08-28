@@ -7,6 +7,10 @@
 #define VIDEO_TIMESCALE 1000000u
 #define MOQ_HANDSHAKE_TIMEOUT_US 5000000ull
 
+#ifndef OBS_OUTPUT_NO_INTERLEAVE
+#define OBS_OUTPUT_NO_INTERLEAVE (1 << 7)
+#endif
+
 MOQOutput::MOQOutput(obs_data_t *settings, obs_output_t *output) : output(output)
 {
 	blog(LOG_INFO, "[obs-moq] output created");
@@ -472,7 +476,7 @@ void register_moq_output()
 {
 	struct obs_output_info info = {};
 	info.id = "moq_output";
-	info.flags = OBS_OUTPUT_AV | OBS_OUTPUT_ENCODED | OBS_OUTPUT_SERVICE;
+	info.flags = OBS_OUTPUT_AV | OBS_OUTPUT_ENCODED | OBS_OUTPUT_SERVICE | OBS_OUTPUT_NO_INTERLEAVE;
 	info.protocols = "MOQ";
 	info.encoded_video_codecs = "h264;hevc;av1";
 	info.encoded_audio_codecs = "aac;opus";
