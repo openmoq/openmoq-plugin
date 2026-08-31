@@ -26,6 +26,11 @@ struct audio_config {
 	uint64_t bitrate;
 };
 
+struct endpoint_config {
+	bool skip_tls_verify = false;
+	moq_version_t draft_version = (moq_version_t)0; // 0 : negotiate automatically
+};
+
 class MOQOutput {
 public:
 	MOQOutput(obs_data_t *settings, obs_output_t *output);
@@ -50,6 +55,7 @@ private:
 	void SendPacket(struct encoder_packet *packet, moq_media_track_t **track, bool is_sync, bool starts_group,
 			bool ends_group);
 	bool ResolveServiceConfig();
+	bool LoadEndpointSettings(obs_service_t *service);
 	bool Connect();
 
 	static void OnReady(void *ctx, moq_media_sender_t *sender);
@@ -72,6 +78,7 @@ private:
 
 	video_config video_conf;
 	audio_config audio_conf;
+	endpoint_config endpoint_conf;
 
 	std::vector<uint8_t> video_init_data;
 	std::string video_codec;
