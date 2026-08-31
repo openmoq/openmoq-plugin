@@ -1,5 +1,6 @@
 #include "moq-output.h"
 #include "codec-signaling.h"
+#include "moq-service.h"
 
 #include <util/platform.h>
 #include <obs.hpp>
@@ -99,6 +100,23 @@ bool MOQOutput::LoadAudioEncoderSettings()
 	return true;
 }
 
+bool MOQOutput::LoadEndpointSettings(obs_service_t *service)
+{
+	OBSDataAutoRelease resolved = obs_service_defaults(obs_service_get_type(service));
+	if (!resolved) {
+		obs_output_signal_stop(output, OBS_OUTPUT_ERROR);
+		return false;
+	}
+
+	OBSDataAutoRelease settings = obs_service_get_settings(service);
+	obs_data_apply(resolved, settings);
+
+	endpoint_conf.skip_tls_verify = obs_data_get_bool(resolved, kSettingSkipTlsVerify);
+	endpoint_conf.draft_version = (moq_version_t)obs_data_get_int(resolved, kSettingDraftVersion);
+
+	return true;
+}
+
 bool MOQOutput::ResolveServiceConfig()
 {
 	url.clear();
@@ -109,6 +127,9 @@ bool MOQOutput::ResolveServiceConfig()
 		obs_output_signal_stop(output, OBS_OUTPUT_ERROR);
 		return false;
 	}
+
+	if (!LoadEndpointSettings(service))
+		return false;
 
 	const char *server = obs_service_get_connect_info(service, OBS_SERVICE_CONNECT_INFO_SERVER_URL);
 	if (server && *server) {
@@ -251,15 +272,17 @@ bool MOQOutput::Connect()
 	moq_endpoint_cfg_init_sized(&ecfg, sizeof(ecfg));
 	ecfg.url.data = (const uint8_t *)url.c_str();
 	ecfg.url.len = url.size();
-	//todo: dynamically resolve from config
-	ecfg.insecure_skip_verify = true;
+	ecfg.insecure_skip_verify = endpoint_conf.skip_tls_verify;
 	ecfg.handshake_timeout_us = MOQ_HANDSHAKE_TIMEOUT_US;
 
-	//todo: revisit if we want to set the version policy to exact or leave it auto
-	static const moq_version_t kVersions[] = {MOQ_VERSION_DRAFT_16};
-	ecfg.versions.policy = MOQ_VERSION_POLICY_EXACT;
-	ecfg.versions.versions = kVersions;
-	ecfg.versions.version_count = 1;
+	ecfg.versions.struct_size = sizeof(ecfg.versions);
+	if (endpoint_conf.draft_version) {
+		ecfg.versions.policy = MOQ_VERSION_POLICY_EXACT;
+		ecfg.versions.versions = &endpoint_conf.draft_version;
+		ecfg.versions.version_count = 1;
+	} else {
+		ecfg.versions.policy = MOQ_VERSION_POLICY_AUTO;
+	}
 
 	moq_media_sender_cfg_t scfg;
 	moq_media_sender_cfg_init_live_sized(&scfg, sizeof(scfg));
@@ -275,9 +298,13 @@ bool MOQOutput::Connect()
 	scfg.callbacks.on_track_closed = &MOQOutput::OnTrackClosed;
 
 	moq_media_sender_t *media_sender = nullptr;
-	if (moq_media_sender_create(&scfg, &media_sender) != MOQ_OK) {
-		blog(LOG_WARNING, "[obs-moq] moq_media_sender_create failed");
-		obs_output_set_last_error(output, obs_module_text("Error.Connect"));
+	moq_result_t create_result = moq_media_sender_create(&scfg, &media_sender);
+	if (create_result != MOQ_OK) {
+		blog(LOG_WARNING, "[obs-moq] moq_media_sender_create failed: %d", (int)create_result);
+		const char *error = (create_result == MOQ_ERR_UNSUPPORTED && endpoint_conf.draft_version)
+					    ? "Error.UnsupportedVersion"
+					    : "Error.Connect";
+		obs_output_set_last_error(output, obs_module_text(error));
 		obs_output_signal_stop(output, OBS_OUTPUT_CONNECT_FAILED);
 		return false;
 	}
