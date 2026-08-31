@@ -3,6 +3,8 @@
 #include <cstring>
 #include <obs.hpp>
 
+#include <moq/session.h>
+
 const char *audio_codecs[] = {"aac", "opus", nullptr};
 const char *video_codecs[] = {"h264", "hevc", "av1", nullptr};
 
@@ -19,12 +21,31 @@ void MOQService::Update(obs_data_t *settings)
 	blog(LOG_DEBUG, "[obs-moq] service updated: server='%s' namespace='%s'", server.c_str(), moq_namespace.c_str());
 }
 
+void MOQService::Defaults(obs_data_t *settings)
+{
+	obs_data_set_default_bool(settings, kSettingSkipTlsVerify, true);
+	obs_data_set_default_int(settings, kSettingDraftVersion, 0);
+}
+
 obs_properties_t *MOQService::Properties()
 {
 	obs_properties_t *ppts = obs_properties_create();
 
 	obs_properties_add_text(ppts, "server", obs_module_text("Service.Server"), OBS_TEXT_DEFAULT);
 	obs_properties_add_text(ppts, "key", obs_module_text("Service.Namespace"), OBS_TEXT_DEFAULT);
+
+	obs_property_t *skip_tls =
+		obs_properties_add_bool(ppts, kSettingSkipTlsVerify, obs_module_text("Service.SkipTlsVerify"));
+	obs_property_set_long_description(skip_tls, obs_module_text("Service.SkipTlsVerify.Desc"));
+
+	// Mirrors the drafts libmoq supports, it exposes no API to enumerate them.
+	obs_property_t *draft = obs_properties_add_list(ppts, kSettingDraftVersion,
+							obs_module_text("Service.DraftVersion"), OBS_COMBO_TYPE_LIST,
+							OBS_COMBO_FORMAT_INT);
+	obs_property_list_add_int(draft, obs_module_text("Service.DraftVersion.Auto"), 0);
+	obs_property_list_add_int(draft, "16", MOQ_VERSION_DRAFT_16);
+	obs_property_list_add_int(draft, "18", MOQ_VERSION_DRAFT_18);
+	obs_property_set_long_description(draft, obs_module_text("Service.DraftVersion.Desc"));
 
 	return ppts;
 }
@@ -104,6 +125,9 @@ void register_moq_service()
 	};
 	info.update = [](void *priv, obs_data_t *settings) {
 		static_cast<MOQService *>(priv)->Update(settings);
+	};
+	info.get_defaults = [](obs_data_t *settings) {
+		MOQService::Defaults(settings);
 	};
 	info.get_properties = [](void *) -> obs_properties_t * {
 		return MOQService::Properties();
