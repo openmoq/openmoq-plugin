@@ -123,7 +123,7 @@ jobs:
       - uses: actions/cache@v4
         id: openssl-cache
         with:
-          path: ${{ github.workspace }}/.deps/openssl-universal/prefix
+          path: ${{ github.workspace }}/.moq-deps/openssl-universal/prefix
           key: ${{ runner.os }}-openssl-universal-${{ hashFiles('.github/scripts/build-openssl-macos') }}
 
       - name: Build Universal OpenSSL 🔐
@@ -145,8 +145,8 @@ jobs:
         id: libmoq-cache
         with:
           path: |
-            ${{ github.workspace }}/.deps/libmoq/prefix
-            ${{ github.workspace }}/.deps/libmoq/picoquic-deps
+            ${{ github.workspace }}/.moq-deps/libmoq/prefix
+            ${{ github.workspace }}/.moq-deps/libmoq/picoquic-deps
           key: ${{ runner.os }}-libmoq-universal-${{ steps.libmoq-rev.outputs.revision }}-${{ hashFiles('.github/scripts/build-libmoq') }}
 
       - name: Build libmoq 🧩
@@ -259,8 +259,8 @@ jobs:
         id: libmoq-cache
         with:
           path: |
-            ${{ github.workspace }}/.deps/libmoq/prefix
-            ${{ github.workspace }}/.deps/libmoq/picoquic-deps
+            ${{ github.workspace }}/.moq-deps/libmoq/prefix
+            ${{ github.workspace }}/.moq-deps/libmoq/picoquic-deps
           key: ${{ runner.os }}-${{ matrix.os }}-libmoq-x86_64-${{ steps.libmoq-rev.outputs.revision }}-${{ hashFiles('.github/scripts/build-libmoq') }}
 
       - name: Build libmoq 🧩

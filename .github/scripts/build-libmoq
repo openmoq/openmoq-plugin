@@ -38,7 +38,7 @@ if [ "${1:-}" = '--print-revision' ]; then
     exit 0
 fi
 
-deps_dir="${LIBMOQ_DEPS_DIR:-${GITHUB_WORKSPACE:-${project_root}}/.deps/libmoq}"
+deps_dir="${LIBMOQ_DEPS_DIR:-${GITHUB_WORKSPACE:-${project_root}}/.moq-deps/libmoq}"
 src_dir="${deps_dir}/moq5"
 build_dir="${deps_dir}/build"
 prefix="${deps_dir}/prefix"

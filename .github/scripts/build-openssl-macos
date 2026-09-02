@@ -8,7 +8,7 @@ DEPLOYMENT_TARGET="${MACOS_DEPLOYMENT_TARGET:-12.0}"
 
 script_dir=$(cd "$(dirname "$0")" && pwd)
 project_root=$(cd "${script_dir}/../.." && pwd)
-deps_dir="${OPENSSL_DEPS_DIR:-${GITHUB_WORKSPACE:-${project_root}}/.deps/openssl-universal}"
+deps_dir="${OPENSSL_DEPS_DIR:-${GITHUB_WORKSPACE:-${project_root}}/.moq-deps/openssl-universal}"
 src_dir="${deps_dir}/openssl-${OPENSSL_VERSION}"
 prefix="${deps_dir}/prefix"
 stamp="${prefix}/.openssl-version"
