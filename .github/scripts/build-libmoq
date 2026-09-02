@@ -55,7 +55,7 @@ if [ "$(uname -s)" = 'Darwin' ]; then
     for arch in ${macos_archs//;/ }; do
         extra_cflags="${extra_cflags} -arch ${arch}"
     done
-    extra_cflags="${extra_cflags} -mmacosx-version-min=${macos_target}"
+    extra_cflags="${extra_cflags} -mmacosx-version-min=${macos_target} -D__APPLE_USE_RFC_3542"
 fi
 
 emit_env() {
