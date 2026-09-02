@@ -86,7 +86,11 @@ git -C "${src_dir}" fetch --depth 1 --quiet origin "${revision}"
 git -C "${src_dir}" checkout -q --force FETCH_HEAD
 
 log 'Setting up pinned picoquic + picotls...'
-MOQ_DEPS_DIR="${pq_deps_dir}" "${src_dir}/scripts/setup_picoquic_deps.sh" >/dev/null
+# picotls takes no cmake args here, so PIC goes in via CFLAGS: without it
+# libpicotls-core.a's TLS relocations cannot link into the plugin's .so.
+MOQ_DEPS_DIR="${pq_deps_dir}" \
+    CFLAGS="${CFLAGS:+${CFLAGS} }-fPIC" \
+    "${src_dir}/scripts/setup_picoquic_deps.sh" >/dev/null
 
 log 'Configuring libmoq...'
 cmake_args=(
