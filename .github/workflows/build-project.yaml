@@ -120,6 +120,42 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-ccache-
 
+      - uses: actions/cache@v4
+        id: openssl-cache
+        with:
+          path: ${{ github.workspace }}/.deps/openssl-universal/prefix
+          key: ${{ runner.os }}-openssl-universal-${{ hashFiles('.github/scripts/build-openssl-macos') }}
+
+      - name: Build Universal OpenSSL 🔐
+        run: |
+          : Build Universal OpenSSL 🔐
+          if (( ${+RUNNER_DEBUG} )) setopt XTRACE
+
+          .github/scripts/build-openssl-macos
+
+      - name: Resolve libmoq Revision 🔎
+        id: libmoq-rev
+        run: |
+          : Resolve libmoq Revision 🔎
+          if (( ${+RUNNER_DEBUG} )) setopt XTRACE
+
+          print "revision=$(.github/scripts/build-libmoq --print-revision)" >> $GITHUB_OUTPUT
+
+      - uses: actions/cache@v4
+        id: libmoq-cache
+        with:
+          path: |
+            ${{ github.workspace }}/.deps/libmoq/prefix
+            ${{ github.workspace }}/.deps/libmoq/picoquic-deps
+          key: ${{ runner.os }}-libmoq-universal-${{ steps.libmoq-rev.outputs.revision }}-${{ hashFiles('.github/scripts/build-libmoq') }}
+
+      - name: Build libmoq 🧩
+        run: |
+          : Build libmoq 🧩
+          if (( ${+RUNNER_DEBUG} )) setopt XTRACE
+
+          .github/scripts/build-libmoq
+
       - name: Set Up Codesigning 🔑
         uses: ./.github/actions/setup-macos-codesigning
         if: fromJSON(needs.check-event.outputs.codesign)

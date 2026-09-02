@@ -77,6 +77,10 @@ cmake --build build -j"$(nproc)"
 
 CI does the same thing automatically: [`.github/scripts/build-libmoq`](.github/scripts/build-libmoq) builds and installs libmoq into `.deps/libmoq/prefix` at the revision pinned in `.github/scripts/.libmoq-version`, then exports `MOQ_PICOQUIC_SOURCE_DIR`, `MOQ_PICOTLS_PREFIX` and `CMAKE_PREFIX_PATH` for the plugin build that follows. To move to a different libmoq, change `MOQ5_REF` there to a commit SHA or a branch name; the build cache is keyed on the SHA it resolves to, so tracking a branch still picks up new commits.
 
+On macOS the plugin is a universal binary, so libmoq and picotls are built for both `arm64` and `x86_64` in a single pass. OpenSSL cannot be built that way — its build system handles one architecture per tree — and neither obs-deps (mbedtls only) nor Homebrew (single-arch) ships a universal one, so [`.github/scripts/build-openssl-macos`](.github/scripts/build-openssl-macos) builds each slice separately and `lipo`s the static archives together. It runs before `build-libmoq` and exports `OPENSSL_ROOT_DIR`. OpenSSL is linked statically, so the plugin carries no Homebrew runtime dependency.
+
+The Windows job is disabled (`if: false`) until libmoq is built there too.
+
 #### Installing the built plugin
 
 Copy the resulting shared object into your OBS install's plugin directory, e.g.:

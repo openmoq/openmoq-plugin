@@ -46,6 +46,18 @@ prefix="${deps_dir}/prefix"
 pq_deps_dir="${deps_dir}/picoquic-deps"
 stamp="${prefix}/.libmoq-revision"
 
+macos_archs="${MACOS_ARCHS:-arm64;x86_64}"
+macos_target="${MACOS_DEPLOYMENT_TARGET:-12.0}"
+extra_cflags=''
+if [ "$(uname -s)" = 'Darwin' ]; then
+    [ -n "${OPENSSL_ROOT_DIR:-}" ] \
+        || die 'OPENSSL_ROOT_DIR not set; run .github/scripts/build-openssl-macos first'
+    for arch in ${macos_archs//;/ }; do
+        extra_cflags="${extra_cflags} -arch ${arch}"
+    done
+    extra_cflags="${extra_cflags} -mmacosx-version-min=${macos_target}"
+fi
+
 emit_env() {
     local -a vars=(
         "MOQ_PICOQUIC_SOURCE_DIR=${pq_deps_dir}/picoquic"
@@ -89,7 +101,8 @@ log 'Setting up pinned picoquic + picotls...'
 # picotls takes no cmake args here, so PIC goes in via CFLAGS: without it
 # libpicotls-core.a's TLS relocations cannot link into the plugin's .so.
 MOQ_DEPS_DIR="${pq_deps_dir}" \
-    CFLAGS="${CFLAGS:+${CFLAGS} }-fPIC" \
+    OPENSSL_ROOT_DIR="${OPENSSL_ROOT_DIR:-}" \
+    CFLAGS="${CFLAGS:+${CFLAGS} }-fPIC${extra_cflags}" \
     "${src_dir}/scripts/setup_picoquic_deps.sh" >/dev/null
 
 log 'Configuring libmoq...'
@@ -109,6 +122,14 @@ cmake_args=(
     -DMOQ_PICOQUIC_SOURCE_DIR="${pq_deps_dir}/picoquic"
     -DMOQ_PICOTLS_PREFIX="${pq_deps_dir}/picotls/build"
 )
+if [ "$(uname -s)" = 'Darwin' ]; then
+    cmake_args+=(
+        -DCMAKE_OSX_ARCHITECTURES="${macos_archs}"
+        -DCMAKE_OSX_DEPLOYMENT_TARGET="${macos_target}"
+        -DOPENSSL_ROOT_DIR="${OPENSSL_ROOT_DIR}"
+        -DOPENSSL_USE_STATIC_LIBS=ON
+    )
+fi
 if command -v ninja >/dev/null 2>&1; then
     cmake_args+=(-G Ninja)
 fi
