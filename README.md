@@ -8,7 +8,7 @@ This is an OpenMOQ plugin for OBS that streams video over [MOQ](https://datatrac
 
 ## Dependencies
 
-* [libmoq](https://github.com/openmoq/moq5) (openmoq/moq5), MOQ protocol implementation, built with the `service` component. Must be built from the [`qualabs:feat/msf-codec-parser`](https://github.com/qualabs/moq5/tree/feat/msf-codec-parser) branch, proposed upstream as [PR #5](https://github.com/openmoq/moq5/pull/5) (see [Required libmoq fork](#required-libmoq-fork) below).
+* [libmoq](https://github.com/openmoq/moq5) (openmoq/moq5), MOQ protocol implementation, built with the `service` component. Must be built from the [qualabs/moq5](https://github.com/qualabs/moq5) fork, whose codec-signaling work is proposed upstream as [PR #5](https://github.com/openmoq/moq5/pull/5) (see [Required libmoq fork](#required-libmoq-fork) below).
 * [OBS Studio fork with dynamic service registration](https://github.com/obsproject/obs-studio/pull/12911), required to use this plugin (see [Required OBS fork](#required-obs-fork) below).
 * CMake 3.28+
 * A C++ compiler with C++17 support (GCC 13+, Clang, or MSVC)
@@ -21,14 +21,14 @@ Until that PR is merged, you'll need to build OBS Studio from that PR's branch/f
 
 ### Required libmoq fork
 
-This plugin currently requires a fork of libmoq (openmoq/moq5): the `feat/msf-codec-parser` branch of [qualabs/moq5](https://github.com/qualabs/moq5/tree/feat/msf-codec-parser), proposed upstream as [PR #5](https://github.com/openmoq/moq5/pull/5). Check out that branch before building libmoq below, the plugin will **not** work against upstream `moq5` as-is.
+This plugin currently requires a fork of libmoq (openmoq/moq5): [qualabs/moq5](https://github.com/qualabs/moq5), whose codec-signaling helpers and sized config initializers are proposed upstream as [PR #5](https://github.com/openmoq/moq5/pull/5). The plugin will **not** build against upstream `moq5` as-is.
 
 ```bash
-git clone -b feat/msf-codec-parser https://github.com/qualabs/moq5.git
+git clone https://github.com/qualabs/moq5.git
 cd moq5
 ```
 
-Then follow the build steps below from that checkout.
+Then follow the build steps below from that checkout. The revision CI builds against is pinned in [`.github/scripts/.libmoq-version`](.github/scripts/.libmoq-version) — currently the `fix/hevc-temporal-sublayers` branch.
 
 ### Building libmoq (openmoq/moq5)
 
@@ -72,6 +72,10 @@ cmake -S . -B build \
 
 cmake --build build -j"$(nproc)"
 ```
+
+#### Building in CI
+
+CI does the same thing automatically: [`.github/scripts/build-libmoq`](.github/scripts/build-libmoq) builds and installs libmoq into `.deps/libmoq/prefix` at the revision pinned in `.github/scripts/.libmoq-version`, then exports `MOQ_PICOQUIC_SOURCE_DIR`, `MOQ_PICOTLS_PREFIX` and `CMAKE_PREFIX_PATH` for the plugin build that follows. To move to a different libmoq, change `MOQ5_REF` there to a commit SHA or a branch name; the build cache is keyed on the SHA it resolves to, so tracking a branch still picks up new commits.
 
 #### Installing the built plugin
 

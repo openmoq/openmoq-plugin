@@ -211,6 +211,29 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ matrix.os }}-ccache-x86_64-
 
+      - name: Resolve libmoq Revision 
+        id: libmoq-rev
+        run: |
+          : Resolve libmoq Revision 
+          if [[ "${RUNNER_DEBUG}" ]]; then set -x; fi
+
+          echo "revision=$(.github/scripts/build-libmoq --print-revision)" >> $GITHUB_OUTPUT
+
+      - uses: actions/cache@v4
+        id: libmoq-cache
+        with:
+          path: |
+            ${{ github.workspace }}/.deps/libmoq/prefix
+            ${{ github.workspace }}/.deps/libmoq/picoquic-deps
+          key: ${{ runner.os }}-${{ matrix.os }}-libmoq-x86_64-${{ steps.libmoq-rev.outputs.revision }}-${{ hashFiles('.github/scripts/build-libmoq') }}
+
+      - name: Build libmoq 🧩
+        run: |
+          : Build libmoq 🧩
+          if [[ "${RUNNER_DEBUG}" ]]; then set -x; fi
+
+          .github/scripts/build-libmoq
+
       - name: Build Plugin 🧱
         uses: ./.github/actions/build-plugin
         with:
