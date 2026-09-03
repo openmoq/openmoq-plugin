@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+OPENSSL_VERSION="${OPENSSL_VERSION:-3.5.7}"
+OPENSSL_SHA256="${OPENSSL_SHA256:-a8c0d28a529ca480f9f36cf5792e2cd21984552a3c8e4aa11a24aa31aeac98e8}"
+DEPLOYMENT_TARGET="${MACOS_DEPLOYMENT_TARGET:-12.0}"
+
+script_dir=$(cd "$(dirname "$0")" && pwd)
+project_root=$(cd "${script_dir}/../.." && pwd)
+deps_dir="${OPENSSL_DEPS_DIR:-${GITHUB_WORKSPACE:-${project_root}}/.moq-deps/openssl-universal}"
+src_dir="${deps_dir}/openssl-${OPENSSL_VERSION}"
+prefix="${deps_dir}/prefix"
+stamp="${prefix}/.openssl-version"
+
+exec 3>&1 1>&2
+
+log() { printf '[build-openssl-macos] %s\n' "$*" >&2; }
+die() { printf '[build-openssl-macos] ERROR: %s\n' "$*" >&2; exit 1; }
+
+emit_env() {
+    printf 'OPENSSL_ROOT_DIR=%s\n' "${prefix}" >&3
+    if [ -n "${GITHUB_ENV:-}" ]; then
+        printf 'OPENSSL_ROOT_DIR=%s\n' "${prefix}" >>"${GITHUB_ENV}"
+    fi
+}
+
+if [ -r "${stamp}" ] && [ "$(cat "${stamp}")" = "${OPENSSL_VERSION}" ]; then
+    log "OpenSSL ${OPENSSL_VERSION} already installed in ${prefix}, skipping build"
+    emit_env
+    exit 0
+fi
+
+tarball="${deps_dir}/openssl-${OPENSSL_VERSION}.tar.gz"
+mkdir -p "${deps_dir}"
+if [ ! -r "${tarball}" ]; then
+    log "Downloading OpenSSL ${OPENSSL_VERSION}..."
+    curl -fsSL --retry 3 \
+        "https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz" \
+        -o "${tarball}"
+fi
+printf '%s  %s\n' "${OPENSSL_SHA256}" "${tarball}" | shasum -a 256 -c - >/dev/null \
+    || die "checksum mismatch for ${tarball}"
+
+rm -rf "${src_dir}"
+tar -xzf "${tarball}" -C "${deps_dir}"
+[ -x "${src_dir}/Configure" ] || die "no Configure in ${src_dir}"
+
+jobs=$(sysctl -n hw.ncpu 2>/dev/null || echo 2)
+
+for arch in arm64 x86_64; do
+    log "Building OpenSSL for ${arch}..."
+    arch_build="${deps_dir}/build-${arch}"
+    rm -rf "${arch_build}"
+    mkdir -p "${arch_build}"
+    (
+        cd "${arch_build}"
+        "${src_dir}/Configure" "darwin64-${arch}-cc" \
+            no-shared no-tests no-apps no-docs \
+            --prefix="${deps_dir}/prefix-${arch}" \
+            --openssldir="${deps_dir}/prefix-${arch}/ssl" \
+            "-mmacosx-version-min=${DEPLOYMENT_TARGET}" >/dev/null
+        make -j"${jobs}" build_libs >/dev/null
+        make install_dev >/dev/null
+    )
+done
+
+if ! diff -r "${deps_dir}/prefix-arm64/include" "${deps_dir}/prefix-x86_64/include" >/dev/null 2>&1; then
+    diff -r "${deps_dir}/prefix-arm64/include" "${deps_dir}/prefix-x86_64/include" >&2 || true
+    die 'per-arch OpenSSL headers differ; a shared include tree would miscompile one slice'
+fi
+
+log "Assembling universal prefix in ${prefix}..."
+rm -rf "${prefix}"
+mkdir -p "${prefix}/lib"
+cp -R "${deps_dir}/prefix-arm64/include" "${prefix}/include"
+for lib in libcrypto.a libssl.a; do
+    lipo -create \
+        "${deps_dir}/prefix-arm64/lib/${lib}" \
+        "${deps_dir}/prefix-x86_64/lib/${lib}" \
+        -output "${prefix}/lib/${lib}"
+    log "  ${lib}: $(lipo -archs "${prefix}/lib/${lib}")"
+done
+
+printf '%s\n' "${OPENSSL_VERSION}" >"${stamp}"
+emit_env

@@ -103,6 +103,17 @@ build() {
 
   cmake_args+=(--preset 'macos-ci')
 
+  if [[ -n ${MOQ_PICOQUIC_SOURCE_DIR:-} ]] {
+    cmake_args+=(
+      -DMOQ_PICOQUIC_SOURCE_DIR=${MOQ_PICOQUIC_SOURCE_DIR}
+      -DMOQ_PICOTLS_PREFIX=${MOQ_PICOTLS_PREFIX:-}
+      -DOPENSSL_ROOT_DIR=${OPENSSL_ROOT_DIR:-}
+      -DOPENSSL_USE_STATIC_LIBS=ON
+      -DCMAKE_COMPILE_WARNING_AS_ERROR=OFF
+      -DCMAKE_C_FLAGS=-D__APPLE_USE_RFC_3542
+    )
+  }
+
   typeset -gx NSUnbufferedIO=YES
 
   typeset -gx CODESIGN_IDENT="${CODESIGN_IDENT:--}"

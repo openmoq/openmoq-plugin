@@ -1,0 +1,145 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+script_dir=$(cd "$(dirname "$0")" && pwd)
+project_root=$(cd "${script_dir}/../.." && pwd)
+version_file="${script_dir}/.libmoq-version"
+
+exec 3>&1 1>&2
+
+log() { printf '[build-libmoq] %s\n' "$*" >&2; }
+die() { printf '[build-libmoq] ERROR: %s\n' "$*" >&2; exit 1; }
+
+[ -r "${version_file}" ] || die "missing ${version_file}"
+
+while IFS='=' read -r key value; do
+    case ${key} in
+    MOQ5_REPO | MOQ5_REF) [ -n "${!key:-}" ] || eval "${key}=\${value}" ;;
+    esac
+done < <(grep -E '^(MOQ5_REPO|MOQ5_REF)=' "${version_file}")
+
+[ -n "${MOQ5_REPO:-}" ] || die "MOQ5_REPO not set in ${version_file}"
+[ -n "${MOQ5_REF:-}" ] || die "MOQ5_REF not set in ${version_file}"
+
+resolve_revision() {
+    if printf '%s' "${MOQ5_REF}" | grep -qE '^[0-9a-f]{40}$'; then
+        printf '%s\n' "${MOQ5_REF}"
+        return 0
+    fi
+    git ls-remote "${MOQ5_REPO}" "${MOQ5_REF}" | head -1 | cut -f1
+}
+
+revision=$(resolve_revision)
+[ -n "${revision}" ] || die "could not resolve '${MOQ5_REF}' in ${MOQ5_REPO}"
+
+if [ "${1:-}" = '--print-revision' ]; then
+    printf '%s\n' "${revision}" >&3
+    exit 0
+fi
+
+deps_dir="${LIBMOQ_DEPS_DIR:-${GITHUB_WORKSPACE:-${project_root}}/.moq-deps/libmoq}"
+src_dir="${deps_dir}/moq5"
+build_dir="${deps_dir}/build"
+prefix="${deps_dir}/prefix"
+
+pq_deps_dir="${deps_dir}/picoquic-deps"
+stamp="${prefix}/.libmoq-revision"
+
+macos_archs="${MACOS_ARCHS:-arm64;x86_64}"
+macos_target="${MACOS_DEPLOYMENT_TARGET:-12.0}"
+extra_cflags=''
+if [ "$(uname -s)" = 'Darwin' ]; then
+    [ -n "${OPENSSL_ROOT_DIR:-}" ] \
+        || die 'OPENSSL_ROOT_DIR not set; run .github/scripts/build-openssl-macos first'
+    for arch in ${macos_archs//;/ }; do
+        extra_cflags="${extra_cflags} -arch ${arch}"
+    done
+    extra_cflags="${extra_cflags} -mmacosx-version-min=${macos_target} -D__APPLE_USE_RFC_3542"
+fi
+
+emit_env() {
+    local -a vars=(
+        "MOQ_PICOQUIC_SOURCE_DIR=${pq_deps_dir}/picoquic"
+        "MOQ_PICOTLS_PREFIX=${pq_deps_dir}/picotls/build"
+        "LIBMOQ_PREFIX=${prefix}"
+        "CMAKE_PREFIX_PATH=${prefix}${CMAKE_PREFIX_PATH:+:${CMAKE_PREFIX_PATH}}"
+    )
+    printf '%s\n' "${vars[@]}" >&3
+    if [ -n "${GITHUB_ENV:-}" ]; then
+        printf '%s\n' "${vars[@]}" >>"${GITHUB_ENV}"
+    fi
+}
+
+if [ -r "${stamp}" ] && [ "$(cat "${stamp}")" = "${revision}" ]; then
+    log "libmoq ${revision} already installed in ${prefix}, skipping build"
+    emit_env
+    exit 0
+fi
+
+if command -v apt-get >/dev/null 2>&1; then
+    log 'Installing libmoq build dependencies...'
+    sudo apt-get update -qq
+    sudo apt-get install -y --no-install-recommends \
+        build-essential cmake ninja-build pkg-config libssl-dev
+fi
+
+command -v cmake >/dev/null 2>&1 || die 'cmake not found'
+
+log "Fetching libmoq ${revision} (${MOQ5_REF}) from ${MOQ5_REPO}..."
+if [ ! -d "${src_dir}/.git" ]; then
+    rm -rf "${src_dir}"
+    mkdir -p "${src_dir}"
+    git -C "${src_dir}" init -q
+    git -C "${src_dir}" remote add origin "${MOQ5_REPO}"
+fi
+
+git -C "${src_dir}" fetch --depth 1 --quiet origin "${revision}"
+git -C "${src_dir}" checkout -q --force FETCH_HEAD
+
+log 'Setting up pinned picoquic + picotls...'
+# picotls takes no cmake args here, so PIC goes in via CFLAGS: without it
+# libpicotls-core.a's TLS relocations cannot link into the plugin's .so.
+MOQ_DEPS_DIR="${pq_deps_dir}" \
+    OPENSSL_ROOT_DIR="${OPENSSL_ROOT_DIR:-}" \
+    CFLAGS="${CFLAGS:+${CFLAGS} }-fPIC${extra_cflags}" \
+    "${src_dir}/scripts/setup_picoquic_deps.sh" >/dev/null
+
+log 'Configuring libmoq...'
+cmake_args=(
+    -S "${src_dir}"
+    -B "${build_dir}"
+    -DCMAKE_BUILD_TYPE="${LIBMOQ_BUILD_TYPE:-RelWithDebInfo}"
+    -DCMAKE_INSTALL_PREFIX="${prefix}"
+    -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+    -DMOQ_BUILD_SERVICE=ON
+    -DMOQ_BUILD_MSF=ON
+    -DMOQ_BUILD_MEDIA_OBJECT=ON
+    -DMOQ_BUILD_ADAPTER_PICOQUIC=ON
+    -DMOQ_BUILD_PQ_THREADED=ON
+    -DMOQ_BUILD_TESTS=OFF
+    -DMOQ_BUILD_EXAMPLES=OFF
+    -DMOQ_PICOQUIC_SOURCE_DIR="${pq_deps_dir}/picoquic"
+    -DMOQ_PICOTLS_PREFIX="${pq_deps_dir}/picotls/build"
+)
+if [ "$(uname -s)" = 'Darwin' ]; then
+    cmake_args+=(
+        -DCMAKE_OSX_ARCHITECTURES="${macos_archs}"
+        -DCMAKE_OSX_DEPLOYMENT_TARGET="${macos_target}"
+        -DOPENSSL_ROOT_DIR="${OPENSSL_ROOT_DIR}"
+        -DOPENSSL_USE_STATIC_LIBS=ON
+    )
+fi
+if command -v ninja >/dev/null 2>&1; then
+    cmake_args+=(-G Ninja)
+fi
+cmake "${cmake_args[@]}"
+
+log 'Building libmoq...'
+cmake --build "${build_dir}" --parallel
+
+log "Installing libmoq into ${prefix}..."
+cmake --install "${build_dir}"
+
+printf '%s\n' "${revision}" >"${stamp}"
+emit_env
