@@ -126,17 +126,17 @@ jobs:
           path: ${{ github.workspace }}/.moq-deps/openssl-universal/prefix
           key: ${{ runner.os }}-openssl-universal-${{ hashFiles('.github/scripts/build-openssl-macos') }}
 
-      - name: Build Universal OpenSSL 🔐
+      - name: Build Universal OpenSSL
         run: |
-          : Build Universal OpenSSL 🔐
+          : Build Universal OpenSSL
           if (( ${+RUNNER_DEBUG} )) setopt XTRACE
 
           .github/scripts/build-openssl-macos
 
-      - name: Resolve libmoq Revision 🔎
+      - name: Resolve libmoq Revision
         id: libmoq-rev
         run: |
-          : Resolve libmoq Revision 🔎
+          : Resolve libmoq Revision
           if (( ${+RUNNER_DEBUG} )) setopt XTRACE
 
           print "revision=$(.github/scripts/build-libmoq --print-revision)" >> $GITHUB_OUTPUT
@@ -149,14 +149,14 @@ jobs:
             ${{ github.workspace }}/.moq-deps/libmoq/picoquic-deps
           key: ${{ runner.os }}-libmoq-universal-${{ steps.libmoq-rev.outputs.revision }}-${{ hashFiles('.github/scripts/build-libmoq') }}
 
-      - name: Build libmoq 🧩
+      - name: Build libmoq
         run: |
-          : Build libmoq 🧩
+          : Build libmoq
           if (( ${+RUNNER_DEBUG} )) setopt XTRACE
 
           .github/scripts/build-libmoq
 
-      - name: Set Up Codesigning 🔑
+      - name: Set Up Codesigning
         uses: ./.github/actions/setup-macos-codesigning
         if: fromJSON(needs.check-event.outputs.codesign)
         id: codesign
