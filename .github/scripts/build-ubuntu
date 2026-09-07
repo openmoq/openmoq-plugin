@@ -200,6 +200,14 @@ ${_usage_host:-}"
           -DCMAKE_INSTALL_PREFIX=/usr
         )
 
+        if [[ -n ${MOQ_PICOQUIC_SOURCE_DIR:-} ]] {
+          cmake_args+=(
+            -DMOQ_PICOQUIC_SOURCE_DIR=${MOQ_PICOQUIC_SOURCE_DIR}
+            -DMOQ_PICOTLS_PREFIX=${MOQ_PICOTLS_PREFIX:-}
+            -DCMAKE_COMPILE_WARNING_AS_ERROR=OFF
+          )
+        }
+
         local cmake_version
         read -r _ _ cmake_version <<< "$(cmake --version)"
 
