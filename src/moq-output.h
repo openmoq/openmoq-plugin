@@ -28,6 +28,7 @@ struct audio_config {
 
 struct endpoint_config {
 	bool skip_tls_verify = false;
+	bool enable_audio = true;
 	moq_version_t draft_version = (moq_version_t)0; // 0 : negotiate automatically
 };
 

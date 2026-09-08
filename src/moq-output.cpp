@@ -117,6 +117,7 @@ bool MOQOutput::LoadEndpointSettings(obs_service_t *service)
 
 	endpoint_conf.skip_tls_verify = obs_data_get_bool(resolved, kSettingSkipTlsVerify);
 	endpoint_conf.draft_version = (moq_version_t)obs_data_get_int(resolved, kSettingDraftVersion);
+	endpoint_conf.enable_audio = obs_data_get_bool(resolved, kSettingEnableAudio);
 
 	return true;
 }
@@ -324,12 +325,15 @@ bool MOQOutput::Connect()
 		}
 	}
 
-	moq_media_track_t *new_audio_track = CreateAudioTrack(media_sender);
-	if (!new_audio_track) {
-		blog(LOG_WARNING, "[obs-moq] failed to create audio track");
-		moq_media_sender_destroy(media_sender);
-		obs_output_signal_stop(output, OBS_OUTPUT_ERROR);
-		return false;
+	moq_media_track_t *new_audio_track = nullptr;
+	if (endpoint_conf.enable_audio) {
+		new_audio_track = CreateAudioTrack(media_sender);
+		if (!new_audio_track) {
+			blog(LOG_WARNING, "[obs-moq] failed to create audio track");
+			moq_media_sender_destroy(media_sender);
+			obs_output_signal_stop(output, OBS_OUTPUT_ERROR);
+			return false;
+		}
 	}
 
 	{
@@ -474,7 +478,7 @@ void MOQOutput::Data(struct encoder_packet *packet)
 	if (packet->type == OBS_ENCODER_VIDEO) {
 		SendPacket(packet, &video_track, packet->keyframe, packet->keyframe, false);
 	}
-	if (packet->type == OBS_ENCODER_AUDIO) {
+	if (packet->type == OBS_ENCODER_AUDIO && endpoint_conf.enable_audio) {
 		SendPacket(packet, &audio_track, true, true, true);
 	}
 }
@@ -488,8 +492,13 @@ void MOQOutput::StartThread()
 		return;
 	}
 
-	if (!LoadVideoEncoderSettings() || !LoadAudioEncoderSettings()) {
-		blog(LOG_WARNING, "[obs-moq] failed to configure video or audio track");
+	if (!LoadVideoEncoderSettings()) {
+		blog(LOG_WARNING, "[obs-moq] failed to configure video track");
+		return;
+	}
+
+	if (endpoint_conf.enable_audio && !LoadAudioEncoderSettings()) {
+		blog(LOG_WARNING, "[obs-moq] failed to configure audio track");
 		return;
 	}
 

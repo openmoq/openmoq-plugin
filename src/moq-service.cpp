@@ -25,6 +25,7 @@ void MOQService::Defaults(obs_data_t *settings)
 {
 	obs_data_set_default_bool(settings, kSettingSkipTlsVerify, true);
 	obs_data_set_default_int(settings, kSettingDraftVersion, 0);
+	obs_data_set_default_bool(settings, kSettingEnableAudio, true);
 }
 
 obs_properties_t *MOQService::Properties()
@@ -33,6 +34,10 @@ obs_properties_t *MOQService::Properties()
 
 	obs_properties_add_text(ppts, "server", obs_module_text("Service.Server"), OBS_TEXT_DEFAULT);
 	obs_properties_add_text(ppts, "key", obs_module_text("Service.Namespace"), OBS_TEXT_DEFAULT);
+
+	obs_property_t *enable_audio =
+		obs_properties_add_bool(ppts, kSettingEnableAudio, obs_module_text("Service.EnableAudio"));
+	obs_property_set_long_description(enable_audio, obs_module_text("Service.EnableAudio.Desc"));
 
 	obs_property_t *skip_tls =
 		obs_properties_add_bool(ppts, kSettingSkipTlsVerify, obs_module_text("Service.SkipTlsVerify"));
