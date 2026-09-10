@@ -75,6 +75,7 @@ private:
 
 	std::vector<uint8_t> video_init_data;
 	std::string video_codec;
+	std::string video_codec_name; // raw OBS encoder codec ("h264"/"hevc"/"av1")
 
 	std::vector<uint8_t> audio_init_data;
 	std::string audio_codec;

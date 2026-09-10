@@ -3,6 +3,8 @@
 
 #include <util/platform.h>
 #include <obs.hpp>
+#include <obs-avc.h>
+#include <obs-hevc.h>
 
 #define VIDEO_TIMESCALE 1000000u
 #define MOQ_HANDSHAKE_TIMEOUT_US 5000000ull
@@ -70,6 +72,7 @@ bool MOQOutput::LoadVideoEncoderSettings()
 
 	video_init_data = BuildInitData(codec, extra, extra_size);
 	video_codec = BuildCodecString(codec, video_init_data);
+	video_codec_name = codec ? codec : "";
 	return true;
 }
 
@@ -177,6 +180,7 @@ moq_media_track_t *MOQOutput::CreateVideoTrackFromPacket(moq_media_sender_t *cur
 
 	video_init_data = std::move(init);
 	video_codec = BuildCodecString(codec, video_init_data);
+	video_codec_name = codec ? codec : "";
 
 	moq_media_track_t *new_track = CreateVideoTrack(cur_sender);
 	if (!new_track) {
@@ -267,6 +271,10 @@ bool MOQOutput::Connect()
 	scfg.namespace_ = namespace_val;
 	scfg.publish_tracks = true;
 	scfg.drop_without_demand = true;
+	// The catalog only needs republishing when tracks change (MSF-01 §5). Leaving
+	// this 0 resolves to libmoq's 1-second default, which republishes the catalog
+	// as a new group every second. Same effect as openmoq/moq5#28.
+	scfg.catalog_refresh_interval_us = UINT64_MAX;
 
 	moq_media_sender_callbacks_init_sized(&scfg.callbacks, sizeof(scfg.callbacks));
 	scfg.callbacks.ctx = this;
@@ -380,9 +388,38 @@ void MOQOutput::SendPacket(struct encoder_packet *packet, moq_media_track_t **tr
 			   bool ends_group)
 {
 
+	// OBS emits AVC/HEVC in Annex-B (start-code delimited), but init_data declares
+	// an avcC/hvcC record, whose lengthSizeMinusOne says NALs carry 4-byte length
+	// prefixes. Players that configure their decoder from that description (MSE,
+	// or WebCodecs with `description` set) fail on Annex-B bytes; players running
+	// WebCodecs in Annex-B mode ignore the description and accept either. Reframe
+	// so the payload matches what we advertise. AV1 carries OBUs, not NALs, so it
+	// is passed through untouched.
+	struct encoder_packet reframed;
+	bool did_reframe = false;
+	const uint8_t *payload_data = packet->data;
+	size_t payload_size = packet->size;
+	if (packet->type == OBS_ENCODER_VIDEO) {
+		if (video_codec_name == "h264") {
+			obs_parse_avc_packet(&reframed, packet);
+			did_reframe = true;
+		} else if (video_codec_name == "hevc") {
+			obs_parse_hevc_packet(&reframed, packet);
+			did_reframe = true;
+		}
+		if (did_reframe) {
+			payload_data = reframed.data;
+			payload_size = reframed.size;
+		}
+	}
+
 	moq_rcbuf_t *payload = nullptr;
 	// moq_rcbuf_create will copy the data into a new rcbuf, and increment the refcount. We will need to decref it after sending, or if we don't send it.
-	if (moq_rcbuf_create(moq_alloc_default(), packet->data, packet->size, &payload) != MOQ_OK) {
+	moq_result_t alloc_result = moq_rcbuf_create(moq_alloc_default(), payload_data, payload_size, &payload);
+	if (did_reframe) {
+		obs_encoder_packet_release(&reframed);
+	}
+	if (alloc_result != MOQ_OK) {
 		blog(LOG_WARNING, "[obs-moq] rcbuf alloc failed");
 		return;
 	}
