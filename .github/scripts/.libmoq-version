@@ -1,0 +1,11 @@
+# libmoq (openmoq/moq5) revision this plugin builds against.
+#
+# Read by .github/scripts/build-libmoq. MOQ5_REF may be a commit SHA or a
+# branch/tag name; either way the CI cache is keyed on the SHA it resolves
+# to, so a moving branch still triggers a rebuild.
+#
+# The plugin needs the codec-signaling helpers and the sized config
+# initializers, which are not in openmoq/moq5 yet (proposed upstream as
+# openmoq/moq5#5), so it tracks the qualabs fork for now.
+MOQ5_REPO=https://github.com/qualabs/moq5.git
+MOQ5_REF=fix/hevc-temporal-sublayers
