@@ -7,9 +7,6 @@
 #define VIDEO_TIMESCALE 1000000u
 #define MOQ_HANDSHAKE_TIMEOUT_US 5000000ull
 
-#ifndef OBS_OUTPUT_NO_INTERLEAVE
-#define OBS_OUTPUT_NO_INTERLEAVE (1 << 7)
-#endif
 
 MOQOutput::MOQOutput(obs_data_t *settings, obs_output_t *output) : output(output)
 {
