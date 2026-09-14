@@ -511,7 +511,13 @@ void register_moq_output()
 {
 	struct obs_output_info info = {};
 	info.id = "moq_output";
-	info.flags = OBS_OUTPUT_AV | OBS_OUTPUT_ENCODED | OBS_OUTPUT_SERVICE | OBS_OUTPUT_NO_INTERLEAVE;
+	uint32_t flags = OBS_OUTPUT_AV | OBS_OUTPUT_ENCODED | OBS_OUTPUT_SERVICE;
+#ifdef OBS_OUTPUT_NO_INTERLEAVE
+	flags |= OBS_OUTPUT_NO_INTERLEAVE;
+#else
+blog(LOG_INFO, "[obs-moq] libobs does not have OBS_OUTPUT_NO_INTERLEAVE; the interleaver will remain active");
+#endif
+	info.flags = flags;
 	info.protocols = "MOQ";
 	info.encoded_video_codecs = "h264;hevc;av1";
 	info.encoded_audio_codecs = "aac;opus";
