@@ -1,6 +1,7 @@
 #pragma once
 #include <obs-module.h>
 
+#include <chrono>
 #include <mutex>
 #include <thread>
 #include <atomic>
@@ -8,6 +9,7 @@
 #include <vector>
 
 #include <moq/url.h>
+#include <moq/wire.h>
 #include <moq/rcbuf.h>
 #include <moq/media_object.h>
 #include <moq/media_sender.h>
@@ -65,6 +67,8 @@ private:
 	std::atomic<size_t> total_bytes_sent;
 	std::atomic<int> connect_time_ms;
 	int64_t start_time_ns = 0;
+
+	int64_t epoch_offset_us = 0;
 
 	std::atomic<bool> stopping;
 	std::atomic<bool> running;

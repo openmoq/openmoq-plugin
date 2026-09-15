@@ -333,6 +333,11 @@ bool MOQOutput::Start()
 	connect_time_ms.store(0);
 	start_time_ns = os_gettime_ns();
 
+	const int64_t wall_us = std::chrono::duration_cast<std::chrono::microseconds>(
+					std::chrono::system_clock::now().time_since_epoch())
+					.count();
+	epoch_offset_us = wall_us - (int64_t)(start_time_ns / 1000);
+
 	if (start_stop_thread.joinable())
 		start_stop_thread.join();
 
@@ -400,6 +405,12 @@ void MOQOutput::SendPacket(struct encoder_packet *packet, moq_media_track_t **tr
 	obj.ends_group = ends_group;
 	obj.presentation_time_us = pts_usec;
 	obj.decode_time_us = (uint64_t)packet->dts_usec;
+
+	const int64_t capture_us = (int64_t)packet->sys_dts_usec + epoch_offset_us;
+	if (epoch_offset_us > 0 && capture_us > 0 && (uint64_t)capture_us <= MOQ_QUIC_VARINT_MAX) {
+		obj.has_capture_time = true;
+		obj.capture_time_us = (uint64_t)capture_us;
+	}
 
 	moq_result_t res;
 	{
