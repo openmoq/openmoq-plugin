@@ -11,6 +11,13 @@
 #define MOQ_HANDSHAKE_TIMEOUT_US 5000000ull
 
 
+#ifndef OBS_OUTPUT_MULTI_TRACK_VIDEO
+#define OBS_OUTPUT_MULTI_TRACK_VIDEO (1 << 6)
+#endif
+
+static constexpr size_t kMainEncoderIdx = 0;
+static constexpr size_t kExtraEncoderIdx = 1;
+
 MOQOutput::MOQOutput(obs_data_t *settings, obs_output_t *output) : output(output)
 {
 	blog(LOG_INFO, "[obs-moq] output created");
@@ -44,37 +51,35 @@ void MOQOutput::SplitNamespace()
 	namespace_val.count = ns_bytes.size();
 }
 
-bool MOQOutput::LoadVideoEncoderSettings()
+bool MOQOutput::LoadVideoEncoderSettings(MOQVideoTrack &vt)
 {
-	obs_encoder_t *venc = obs_output_get_video_encoder(output);
+	obs_encoder_t *venc = obs_output_get_video_encoder2(output, vt.encoder_idx);
 	if (!venc) {
-		blog(LOG_WARNING, "[obs-moq] no video encoder assigned");
+		blog(LOG_WARNING, "[obs-moq] no video encoder assigned at index %zu", vt.encoder_idx);
 		obs_output_set_last_error(output, obs_module_text("Error.NoEncoder"));
 		return false;
 	}
 
 	OBSDataAutoRelease settings = obs_encoder_get_settings(venc);
-	video_conf.bitrate = (uint64_t)obs_data_get_int(settings, "bitrate") * 1000;
+	vt.conf.bitrate = (uint64_t)obs_data_get_int(settings, "bitrate") * 1000;
 
 	const char *codec = obs_encoder_get_codec(venc);
-	//todo: add codec validation here
-
-	video_conf.video_width = obs_encoder_get_width(venc);
-	video_conf.video_height = obs_encoder_get_height(venc);
+	vt.conf.video_width = obs_encoder_get_width(venc);
+	vt.conf.video_height = obs_encoder_get_height(venc);
 
 	struct obs_video_info ovi = {};
 	obs_get_video_info(&ovi);
-	video_conf.fps_num = ovi.fps_num;
-	video_conf.fps_den = ovi.fps_den;
+	vt.conf.fps_num = ovi.fps_num;
+	vt.conf.fps_den = ovi.fps_den;
 
 	//initialize init_data
 	uint8_t *extra = nullptr;
 	size_t extra_size = 0;
 	obs_encoder_get_extra_data(venc, &extra, &extra_size);
 
-	video_init_data = BuildInitData(codec, extra, extra_size);
-	video_codec = BuildCodecString(codec, video_init_data);
-	video_track_codec = ResolveTrackCodec(codec);
+	vt.init_data = BuildInitData(codec, extra, extra_size);
+	vt.codec = BuildCodecString(codec, vt.init_data);
+	vt.track_codec = ResolveTrackCodec(codec);
 	return true;
 }
 
@@ -121,6 +126,126 @@ bool MOQOutput::LoadEndpointSettings(obs_service_t *service)
 	return true;
 }
 
+static std::string read_extra_canvas_uuid(obs_service_t *service)
+{
+	if (!service)
+		return {};
+
+	OBSDataAutoRelease settings = obs_service_get_settings(service);
+	if (!settings)
+		return {};
+
+	const char *uuid = obs_data_get_string(settings, kSettingExtraCanvas);
+	return uuid ? uuid : "";
+}
+
+bool MOQOutput::SetupExtraVideo(const char *canvas_uuid)
+{
+	if (!extra_canvas_resolve(canvas_uuid, &extra_conf)) {
+		blog(LOG_WARNING, "[obs-moq] the configured extra canvas could not be resolved");
+		obs_output_set_last_error(output, obs_module_text("Error.NoExtraCanvas"));
+		extra_conf = {};
+		return false;
+	}
+
+	obs_encoder_t *main_encoder = obs_output_get_video_encoder(output);
+	if (!main_encoder) {
+		blog(LOG_WARNING, "[obs-moq] no video encoder assigned");
+		obs_output_set_last_error(output, obs_module_text("Error.NoEncoder"));
+		extra_conf = {};
+		return false;
+	}
+
+	const char *enc_id = obs_encoder_get_id(main_encoder);
+	OBSDataAutoRelease settings = obs_encoder_get_settings(main_encoder);
+
+	obs_encoder_t *venc = obs_video_encoder_create(enc_id, "moq_extra_video", settings, nullptr);
+	if (!venc) {
+		blog(LOG_WARNING, "[obs-moq] failed to create the extra video encoder '%s'", enc_id);
+		obs_output_set_last_error(output, obs_module_text("Error.NoEncoder"));
+		extra_conf = {};
+		return false;
+	}
+
+	obs_encoder_set_video(venc, extra_conf.video);
+	// Attempt to coordinate the two encoders startup
+	encoder_group = obs_encoder_group_create();
+	if (encoder_group) {
+		if (!obs_encoder_set_group(main_encoder, encoder_group))
+			blog(LOG_WARNING, "[obs-moq] main encoder could not join the group; "
+					  "canvas start times will not be aligned");
+		obs_encoder_set_group(venc, encoder_group);
+	}
+
+	extra_encoder = venc;
+	obs_output_set_video_encoder2(output, venc, kExtraEncoderIdx);
+
+	blog(LOG_INFO, "[obs-moq] extra canvas %ux%u @ %.3f fps attached to encoder slot %zu (cloned '%s')",
+	     extra_conf.width, extra_conf.height, (double)extra_conf.fps_num / (double)extra_conf.fps_den,
+	     kExtraEncoderIdx, enc_id);
+	return true;
+}
+
+void MOQOutput::ReleaseExtraVideo()
+{
+	extra_conf = {};
+
+	if (!obs_output_active(output))
+		obs_output_set_video_encoder2(output, nullptr, kExtraEncoderIdx);
+
+	if (extra_encoder) {
+		obs_encoder_release(extra_encoder);
+		extra_encoder = nullptr;
+	}
+
+	if (encoder_group) {
+		obs_encoder_group_destroy(encoder_group);
+		encoder_group = nullptr;
+	}
+}
+
+bool MOQOutput::LoadVideoTracks()
+{
+	video_tracks.clear();
+
+	const bool multitrack = extra_conf.video != nullptr;
+
+	auto add_track = [&](size_t encoder_idx, int alt_group) -> bool {
+		MOQVideoTrack vt;
+		vt.encoder_idx = encoder_idx;
+
+		if (!LoadVideoEncoderSettings(vt))
+			return false;
+
+		if (multitrack) {
+			const char *role = encoder_idx == kExtraEncoderIdx ? "video_extra_" : "video_main_";
+			vt.name = role + std::to_string(vt.conf.video_width) + "x" +
+				  std::to_string(vt.conf.video_height);
+			vt.has_alt_group = true;
+			vt.alt_group = alt_group;
+		} else {
+			vt.name = "video";
+		}
+
+		char alt_group_str[16] = "none";
+		if (vt.has_alt_group)
+			snprintf(alt_group_str, sizeof(alt_group_str), "%d", vt.alt_group);
+
+		blog(LOG_INFO, "[obs-moq] video track '%s' from encoder slot %zu (%ux%u, altGroup %s)",
+		     vt.name.c_str(), vt.encoder_idx, vt.conf.video_width, vt.conf.video_height, alt_group_str);
+
+		video_tracks.push_back(std::move(vt));
+		return true;
+	};
+
+	if (!add_track(kMainEncoderIdx, 1))
+		return false;
+	if (multitrack && !add_track(kExtraEncoderIdx, 2))
+		return false;
+
+	return !video_tracks.empty();
+}
+
 bool MOQOutput::ResolveServiceConfig()
 {
 	url.clear();
@@ -148,8 +273,6 @@ bool MOQOutput::ResolveServiceConfig()
 
 	const char *key = obs_service_get_connect_info(service, OBS_SERVICE_CONNECT_INFO_STREAM_KEY);
 	if (key && *key) {
-		// TODO: erase this log line after testing
-		blog(LOG_INFO, "[obs-moq] using Namespace from service: %s", key);
 		stream_key = key;
 	} else {
 		blog(LOG_WARNING, "[obs-moq] no stream key configured in the service");
@@ -163,23 +286,25 @@ bool MOQOutput::ResolveServiceConfig()
 	return true;
 }
 
-moq_media_track_t *MOQOutput::CreateVideoTrack(moq_media_sender_t *new_sender)
+moq_media_track_t *MOQOutput::CreateVideoTrack(MOQVideoTrack &vt, moq_media_sender_t *new_sender)
 {
 	moq_media_track_cfg_t tcfg;
 	moq_media_track_cfg_init(&tcfg);
-	tcfg.name = {(const uint8_t *)"video", 5};
+	tcfg.name = {(const uint8_t *)vt.name.c_str(), vt.name.size()};
 	tcfg.media_type = MOQ_MEDIA_TYPE_VIDEO;
 	// todo: make this configurable and add CMAF support
 	tcfg.packaging = MOQ_MEDIA_PACKAGING_RAW;
-	tcfg.codec = {(const uint8_t *)video_codec.c_str(), video_codec.size()};
+	tcfg.codec = {(const uint8_t *)vt.codec.c_str(), vt.codec.size()};
 	tcfg.timescale = VIDEO_TIMESCALE;
 	// todo: analyze actual need for this and how it fits w/other codecs
-	tcfg.init_data = {video_init_data.data(), video_init_data.size()};
+	tcfg.init_data = {vt.init_data.data(), vt.init_data.size()};
 	tcfg.is_live = true;
-	tcfg.width = video_conf.video_width;
-	tcfg.height = video_conf.video_height;
-	tcfg.framerate_millis = video_conf.fps_num * 1000 / video_conf.fps_den;
-	tcfg.bitrate = video_conf.bitrate;
+	tcfg.width = vt.conf.video_width;
+	tcfg.height = vt.conf.video_height;
+	tcfg.framerate_millis = vt.conf.fps_num * 1000 / vt.conf.fps_den;
+	tcfg.bitrate = vt.conf.bitrate;
+	tcfg.has_alt_group = vt.has_alt_group;
+	tcfg.alt_group = vt.alt_group;
 
 	moq_media_track_t *new_track = nullptr;
 	moq_result_t result = moq_media_sender_add_track(new_sender, &tcfg, &new_track);
@@ -190,9 +315,10 @@ moq_media_track_t *MOQOutput::CreateVideoTrack(moq_media_sender_t *new_sender)
 	return new_track;
 }
 
-moq_media_track_t *MOQOutput::CreateVideoTrackFromPacket(moq_media_sender_t *cur_sender, struct encoder_packet *packet)
+moq_media_track_t *MOQOutput::CreateVideoTrackFromPacket(MOQVideoTrack &vt, moq_media_sender_t *cur_sender,
+							 struct encoder_packet *packet)
 {
-	obs_encoder_t *venc = obs_output_get_video_encoder(output);
+	obs_encoder_t *venc = obs_output_get_video_encoder2(output, vt.encoder_idx);
 	const char *codec = venc ? obs_encoder_get_codec(venc) : nullptr;
 
 	std::vector<uint8_t> init = BuildInitData(codec, packet->data, packet->size);
@@ -200,18 +326,18 @@ moq_media_track_t *MOQOutput::CreateVideoTrackFromPacket(moq_media_sender_t *cur
 		return nullptr;
 	}
 
-	video_init_data = std::move(init);
-	video_codec = BuildCodecString(codec, video_init_data);
-	video_track_codec = ResolveTrackCodec(codec);
+	vt.init_data = std::move(init);
+	vt.codec = BuildCodecString(codec, vt.init_data);
+	vt.track_codec = ResolveTrackCodec(codec);
 
-	moq_media_track_t *new_track = CreateVideoTrack(cur_sender);
+	moq_media_track_t *new_track = CreateVideoTrack(vt, cur_sender);
 	if (!new_track) {
-		blog(LOG_WARNING, "[obs-moq] failed to create video track from first frame");
+		blog(LOG_WARNING, "[obs-moq] failed to create track '%s' from first frame", vt.name.c_str());
 		return nullptr;
 	}
 
-	blog(LOG_INFO, "[obs-moq] video track created from first frame (codec %s, init_data %zu bytes)",
-	     video_codec.c_str(), video_init_data.size());
+	blog(LOG_INFO, "[obs-moq] track '%s' created from first frame (codec %s, init_data %zu bytes)",
+	     vt.name.c_str(), vt.codec.c_str(), vt.init_data.size());
 	return new_track;
 }
 
@@ -314,11 +440,15 @@ bool MOQOutput::Connect()
 		return false;
 	}
 
-	moq_media_track_t *new_video_track = nullptr;
-	if (!video_init_data.empty()) {
-		new_video_track = CreateVideoTrack(media_sender);
-		if (!new_video_track) {
-			blog(LOG_WARNING, "[obs-moq] failed to create video track");
+	// Every video track and the shared audio track go into this one catalog, so a
+	// subscriber sees one broadcast and picks a track within it.
+	for (MOQVideoTrack &vt : video_tracks) {
+		if (vt.init_data.empty())
+			continue; // created from the first keyframe instead
+
+		vt.track = CreateVideoTrack(vt, media_sender);
+		if (!vt.track) {
+			blog(LOG_WARNING, "[obs-moq] failed to create video track '%s'", vt.name.c_str());
 			moq_media_sender_destroy(media_sender);
 			obs_output_signal_stop(output, OBS_OUTPUT_ERROR);
 			return false;
@@ -336,7 +466,6 @@ bool MOQOutput::Connect()
 	{
 		std::lock_guard<std::mutex> lock(sender_mutex);
 		sender = media_sender;
-		video_track = new_video_track;
 		audio_track = new_audio_track;
 	}
 
@@ -349,12 +478,20 @@ bool MOQOutput::Start()
 
 	blog(LOG_INFO, "[obs-moq] Start() requested");
 
+	ReleaseExtraVideo();
+
+	const std::string extra_canvas_uuid = read_extra_canvas_uuid(obs_output_get_service(output));
+	if (!extra_canvas_uuid.empty() && !SetupExtraVideo(extra_canvas_uuid.c_str())) {
+		blog(LOG_ERROR, "[obs-moq] cannot start requested extra video");
+		return false;
+	}
+
 	if (!obs_output_can_begin_data_capture(output, 0)) {
-		blog(LOG_WARNING, "[obs-moq] cannot begin data capture");
+		blog(LOG_ERROR, "[obs-moq] cannot begin data capture");
 		return false;
 	}
 	if (!obs_output_initialize_encoders(output, 0)) {
-		blog(LOG_WARNING, "[obs-moq] failed to initialize encoders");
+		blog(LOG_ERROR, "[obs-moq] failed to initialize encoders");
 		return false;
 	}
 
@@ -397,12 +534,14 @@ void MOQOutput::Stop(bool signal)
 		std::lock_guard<std::mutex> slock(sender_mutex);
 		doomed = sender;
 		sender = nullptr;
-		video_track = nullptr;
 		audio_track = nullptr;
+		video_tracks.clear();
 	}
 	if (doomed) {
 		moq_media_sender_destroy(doomed);
 	}
+
+	ReleaseExtraVideo();
 
 	if (signal) {
 		obs_output_signal_stop(output, OBS_OUTPUT_SUCCESS);
@@ -433,28 +572,20 @@ static bool ReframeAnnexB(const TrackCodec *video_codec, struct encoder_packet *
 	return true;
 }
 
-void MOQOutput::SendPacket(struct encoder_packet *packet, moq_media_track_t **track, bool is_sync, bool starts_group,
-			   bool ends_group)
+void MOQOutput::WriteMediaObject(moq_media_track_t *track, struct encoder_packet *packet, const uint8_t *data,
+				 size_t size, bool is_sync, bool starts_group, bool ends_group)
 {
-	struct encoder_packet reframed;
-	bool did_reframe = ReframeAnnexB(video_track_codec, packet, &reframed);
-	const uint8_t *payload_data = did_reframe ? reframed.data : packet->data;
-	size_t payload_size = did_reframe ? reframed.size : packet->size;
-
 	moq_rcbuf_t *payload = nullptr;
-	// moq_rcbuf_create will copy the data into a new rcbuf, and increment the refcount. We will need to decref it after sending, or if we don't send it.
-	moq_result_t alloc_result = moq_rcbuf_create(moq_alloc_default(), payload_data, payload_size, &payload);
-	if (did_reframe) {
-		obs_encoder_packet_release(&reframed);
-	}
-	if (alloc_result != MOQ_OK) {
+	if (moq_rcbuf_create(moq_alloc_default(), data, size, &payload) != MOQ_OK) {
 		blog(LOG_WARNING, "[obs-moq] rcbuf alloc failed");
 		return;
 	}
 
-	uint64_t pts_usec = 0;
-	pts_usec = util_mul_div64((uint64_t)packet->pts, 1000000ull * (uint64_t)packet->timebase_num,
-				  (uint64_t)packet->timebase_den);
+	// The encoder's own pts/dts, converted to microseconds with its timebase.
+	const uint64_t pts_usec = util_mul_div64((uint64_t)packet->pts, 1000000ull * (uint64_t)packet->timebase_num,
+						 (uint64_t)packet->timebase_den);
+	const uint64_t dts_usec = util_mul_div64((uint64_t)packet->dts, 1000000ull * (uint64_t)packet->timebase_num,
+						 (uint64_t)packet->timebase_den);
 
 	moq_media_send_object_t obj = {};
 	obj.struct_size = sizeof(obj);
@@ -464,7 +595,7 @@ void MOQOutput::SendPacket(struct encoder_packet *packet, moq_media_track_t **tr
 	obj.starts_group = starts_group;
 	obj.ends_group = ends_group;
 	obj.presentation_time_us = pts_usec;
-	obj.decode_time_us = (uint64_t)packet->dts_usec;
+	obj.decode_time_us = dts_usec;
 
 	const int64_t capture_us = (int64_t)packet->sys_dts_usec + epoch_offset_us;
 	if (epoch_offset_us > 0 && capture_us > 0 && (uint64_t)capture_us <= MOQ_QUIC_VARINT_MAX) {
@@ -472,32 +603,44 @@ void MOQOutput::SendPacket(struct encoder_packet *packet, moq_media_track_t **tr
 		obj.capture_time_us = (uint64_t)capture_us;
 	}
 
-	moq_result_t res;
-	{
-		std::lock_guard<std::mutex> lock(sender_mutex);
-		if (!sender) {
-			moq_rcbuf_decref(payload);
-			return;
-		}
-
-		if (!*track && packet->type == OBS_ENCODER_VIDEO && packet->keyframe) {
-			*track = CreateVideoTrackFromPacket(sender, packet);
-		}
-
-		if (!*track) {
-			moq_rcbuf_decref(payload);
-			return;
-		}
-
-		res = moq_media_sender_write(sender, *track, &obj);
-	}
-
-	if (res != MOQ_OK) {
+	if (moq_media_sender_write(sender, track, &obj) != MOQ_OK) {
 		moq_rcbuf_decref(payload);
 		return;
 	}
 
-	total_bytes_sent.fetch_add(packet->size);
+	total_bytes_sent.fetch_add(size);
+}
+
+void MOQOutput::SendVideoPacket(MOQVideoTrack &vt, struct encoder_packet *packet)
+{
+	if (!sender)
+		return;
+
+	if (!vt.track) {
+		if (!packet->keyframe)
+			return;
+		vt.track = CreateVideoTrackFromPacket(vt, sender, packet);
+		if (!vt.track)
+			return;
+	}
+
+	struct encoder_packet reframed;
+	bool did_reframe = ReframeAnnexB(vt.track_codec, packet, &reframed);
+	const uint8_t *payload_data = did_reframe ? reframed.data : packet->data;
+	size_t payload_size = did_reframe ? reframed.size : packet->size;
+
+	WriteMediaObject(vt.track, packet, payload_data, payload_size, packet->keyframe, packet->keyframe, false);
+
+	if (did_reframe)
+		obs_encoder_packet_release(&reframed);
+}
+
+void MOQOutput::SendAudioPacket(struct encoder_packet *packet)
+{
+	if (!sender || !audio_track)
+		return;
+
+	WriteMediaObject(audio_track, packet, packet->data, packet->size, true, true, true);
 }
 
 void MOQOutput::Data(struct encoder_packet *packet)
@@ -511,11 +654,18 @@ void MOQOutput::Data(struct encoder_packet *packet)
 	if (!running.load()) {
 		return;
 	}
+
+	std::lock_guard<std::mutex> lock(sender_mutex);
+
 	if (packet->type == OBS_ENCODER_VIDEO) {
-		SendPacket(packet, &video_track, packet->keyframe, packet->keyframe, false);
-	}
-	if (packet->type == OBS_ENCODER_AUDIO) {
-		SendPacket(packet, &audio_track, true, true, true);
+		for (MOQVideoTrack &vt : video_tracks) {
+			if (vt.encoder_idx == packet->track_idx) {
+				SendVideoPacket(vt, packet);
+				break;
+			}
+		}
+	} else if (packet->type == OBS_ENCODER_AUDIO) {
+		SendAudioPacket(packet);
 	}
 }
 
@@ -528,8 +678,13 @@ void MOQOutput::StartThread()
 		return;
 	}
 
-	if (!LoadVideoEncoderSettings() || !LoadAudioEncoderSettings()) {
-		blog(LOG_WARNING, "[obs-moq] failed to configure video or audio track");
+	if (!LoadVideoTracks()) {
+		blog(LOG_WARNING, "[obs-moq] failed to configure video tracks");
+		return;
+	}
+
+	if (!LoadAudioEncoderSettings()) {
+		blog(LOG_WARNING, "[obs-moq] failed to configure audio track");
 		return;
 	}
 
@@ -543,7 +698,7 @@ void register_moq_output()
 {
 	struct obs_output_info info = {};
 	info.id = "moq_output";
-	uint32_t flags = OBS_OUTPUT_AV | OBS_OUTPUT_ENCODED | OBS_OUTPUT_SERVICE;
+	uint32_t flags = OBS_OUTPUT_AV | OBS_OUTPUT_ENCODED | OBS_OUTPUT_SERVICE | OBS_OUTPUT_MULTI_TRACK_VIDEO;
 #ifdef OBS_OUTPUT_NO_INTERLEAVE
 	flags |= OBS_OUTPUT_NO_INTERLEAVE;
 #else
