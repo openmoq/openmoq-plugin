@@ -10,7 +10,6 @@
 #define VIDEO_TIMESCALE 1000000u
 #define MOQ_HANDSHAKE_TIMEOUT_US 5000000ull
 
-
 MOQOutput::MOQOutput(obs_data_t *settings, obs_output_t *output) : output(output)
 {
 	blog(LOG_INFO, "[obs-moq] output created");
@@ -547,7 +546,7 @@ void register_moq_output()
 #ifdef OBS_OUTPUT_NO_INTERLEAVE
 	flags |= OBS_OUTPUT_NO_INTERLEAVE;
 #else
-blog(LOG_INFO, "[obs-moq] libobs does not have OBS_OUTPUT_NO_INTERLEAVE; the interleaver will remain active");
+	blog(LOG_INFO, "[obs-moq] libobs does not have OBS_OUTPUT_NO_INTERLEAVE; the interleaver will remain active");
 #endif
 	info.flags = flags;
 	info.protocols = "MOQ";
