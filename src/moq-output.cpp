@@ -4,10 +4,11 @@
 
 #include <util/platform.h>
 #include <obs.hpp>
+#include <obs-avc.h>
+#include <obs-hevc.h>
 
 #define VIDEO_TIMESCALE 1000000u
 #define MOQ_HANDSHAKE_TIMEOUT_US 5000000ull
-
 
 MOQOutput::MOQOutput(obs_data_t *settings, obs_output_t *output) : output(output)
 {
@@ -72,6 +73,7 @@ bool MOQOutput::LoadVideoEncoderSettings()
 
 	video_init_data = BuildInitData(codec, extra, extra_size);
 	video_codec = BuildCodecString(codec, video_init_data);
+	video_track_codec = ResolveTrackCodec(codec);
 	return true;
 }
 
@@ -199,6 +201,7 @@ moq_media_track_t *MOQOutput::CreateVideoTrackFromPacket(moq_media_sender_t *cur
 
 	video_init_data = std::move(init);
 	video_codec = BuildCodecString(codec, video_init_data);
+	video_track_codec = ResolveTrackCodec(codec);
 
 	moq_media_track_t *new_track = CreateVideoTrack(cur_sender);
 	if (!new_track) {
@@ -409,13 +412,41 @@ void MOQOutput::Stop(bool signal)
 	start_time_ns = os_gettime_ns();
 }
 
+static bool ReframeAnnexB(const TrackCodec *video_codec, struct encoder_packet *packet, struct encoder_packet *out)
+{
+	if (packet->type != OBS_ENCODER_VIDEO)
+		return false;
+
+	if (video_codec == &kCodecH264)
+		obs_parse_avc_packet(out, packet);
+	else if (video_codec == &kCodecH265)
+		obs_parse_hevc_packet(out, packet);
+	else
+		return false;
+
+	if (out->size == 0 && packet->size > 0) {
+		obs_encoder_packet_release(out);
+		return false;
+	}
+
+	return true;
+}
+
 void MOQOutput::SendPacket(struct encoder_packet *packet, moq_media_track_t **track, bool is_sync, bool starts_group,
 			   bool ends_group)
 {
+	struct encoder_packet reframed;
+	bool did_reframe = ReframeAnnexB(video_track_codec, packet, &reframed);
+	const uint8_t *payload_data = did_reframe ? reframed.data : packet->data;
+	size_t payload_size = did_reframe ? reframed.size : packet->size;
 
 	moq_rcbuf_t *payload = nullptr;
 	// moq_rcbuf_create will copy the data into a new rcbuf, and increment the refcount. We will need to decref it after sending, or if we don't send it.
-	if (moq_rcbuf_create(moq_alloc_default(), packet->data, packet->size, &payload) != MOQ_OK) {
+	moq_result_t alloc_result = moq_rcbuf_create(moq_alloc_default(), payload_data, payload_size, &payload);
+	if (did_reframe) {
+		obs_encoder_packet_release(&reframed);
+	}
+	if (alloc_result != MOQ_OK) {
 		blog(LOG_WARNING, "[obs-moq] rcbuf alloc failed");
 		return;
 	}
@@ -515,7 +546,7 @@ void register_moq_output()
 #ifdef OBS_OUTPUT_NO_INTERLEAVE
 	flags |= OBS_OUTPUT_NO_INTERLEAVE;
 #else
-blog(LOG_INFO, "[obs-moq] libobs does not have OBS_OUTPUT_NO_INTERLEAVE; the interleaver will remain active");
+	blog(LOG_INFO, "[obs-moq] libobs does not have OBS_OUTPUT_NO_INTERLEAVE; the interleaver will remain active");
 #endif
 	info.flags = flags;
 	info.protocols = "MOQ";
