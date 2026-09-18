@@ -4,7 +4,6 @@
 #include <string>
 #include <vector>
 
-// A second OBS canvas, published alongside the main one as its own video track.
 struct extra_canvas_info {
 	video_t *video = nullptr;
 	uint32_t width = 0;
