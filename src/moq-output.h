@@ -14,6 +14,8 @@
 #include <moq/media_object.h>
 #include <moq/media_sender.h>
 
+struct TrackCodec;
+
 struct video_config {
 	uint32_t video_width;
 	uint32_t video_height;
@@ -86,6 +88,7 @@ private:
 
 	std::vector<uint8_t> video_init_data;
 	std::string video_codec;
+	const TrackCodec *video_track_codec = nullptr;
 
 	std::vector<uint8_t> audio_init_data;
 	std::string audio_codec;
