@@ -48,6 +48,8 @@ target_sources(
     src/codec-signaling.h
     src/moq-service.cpp
     src/moq-service.h
+    src/extra-canvas.cpp
+    src/extra-canvas.h
 )
 
 set_target_properties_plugin(${CMAKE_PROJECT_NAME} PROPERTIES OUTPUT_NAME ${_name})

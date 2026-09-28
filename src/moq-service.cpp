@@ -1,4 +1,5 @@
 #include "moq-service.h"
+#include "extra-canvas.h"
 
 #include <cstring>
 #include <obs.hpp>
@@ -25,6 +26,7 @@ void MOQService::Defaults(obs_data_t *settings)
 {
 	obs_data_set_default_bool(settings, kSettingSkipTlsVerify, true);
 	obs_data_set_default_int(settings, kSettingDraftVersion, 0);
+	obs_data_set_default_string(settings, kSettingExtraCanvas, "");
 }
 
 obs_properties_t *MOQService::Properties()
@@ -33,6 +35,14 @@ obs_properties_t *MOQService::Properties()
 
 	obs_properties_add_text(ppts, "server", obs_module_text("Service.Server"), OBS_TEXT_DEFAULT);
 	obs_properties_add_text(ppts, "key", obs_module_text("Service.Namespace"), OBS_TEXT_DEFAULT);
+
+	obs_property_t *extra = obs_properties_add_list(ppts, kSettingExtraCanvas,
+						       obs_module_text("Service.ExtraCanvas"), OBS_COMBO_TYPE_LIST,
+						       OBS_COMBO_FORMAT_STRING);
+	obs_property_list_add_string(extra, obs_module_text("Service.ExtraCanvas.None"), "");
+	for (const extra_canvas_entry &entry : extra_canvas_list())
+		obs_property_list_add_string(extra, entry.name.c_str(), entry.uuid.c_str());
+	obs_property_set_long_description(extra, obs_module_text("Service.ExtraCanvas.Desc"));
 
 	obs_property_t *skip_tls =
 		obs_properties_add_bool(ppts, kSettingSkipTlsVerify, obs_module_text("Service.SkipTlsVerify"));

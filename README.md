@@ -95,6 +95,24 @@ cp build/obs-moq.so </path/to/obs-install>/lib/x86_64-linux-gnu/obs-plugins/
 2. In the **Server** field, enter the URL of the MOQ relay you want to publish to.
 3. In the **Stream Key** field, enter the MOQ namespace, with each namespace tuple part separated by a dash (`-`). For example, a namespace of `["live", "user123"]` would be entered as `live-user123`.
 
+### Multitrack: publishing a second canvas
+
+The MOQ service has an **Additional canvas (multitrack)** dropdown listing every
+canvas OBS has registered.
+
+With **None** (the default), nothing changes: one `video` track, one `audio`
+track, on the stream key as the namespace. Pick a canvas and it is encoded in
+parallel with the main one and published as **two video tracks in one
+broadcast**, which is the common case being the portrait canvas contributed by the
+[Aitum Vertical](https://github.com/Aitum/obs-vertical-canvas) plugin:
+
+| Source canvas | Track | altGroup |
+| --- | --- | --- |
+| Main (landscape) | `video_main_1280x720` | 1 |
+| Additional (portrait) | `video_extra_1080x1920` | 2 |
+| — | `audio` (shared) | — |
+
+
 ## Tested against
 
 This plugin has been, and continues to be, tested using:
