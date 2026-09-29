@@ -583,7 +583,8 @@ void MOQOutput::SendPacket(struct encoder_packet *packet, moq_media_track_t **tr
 
 		moq_rcbuf_t *payload = nullptr;
 		// moq_rcbuf_create will copy the data into a new rcbuf, and increment the refcount. We will need to decref it after sending, or if we don't send it.
-		moq_result_t alloc_result = moq_rcbuf_create(moq_alloc_default(), fragment.data, fragment.len, &payload);
+		moq_result_t alloc_result =
+			moq_rcbuf_create(moq_alloc_default(), fragment.data, fragment.len, &payload);
 		if (did_reframe)
 			obs_encoder_packet_release(&reframed);
 		if (alloc_result != MOQ_OK) {
