@@ -25,6 +25,7 @@ void MOQService::Defaults(obs_data_t *settings)
 {
 	obs_data_set_default_bool(settings, kSettingSkipTlsVerify, true);
 	obs_data_set_default_int(settings, kSettingDraftVersion, 0);
+	obs_data_set_default_string(settings, kSettingContainer, kContainerLOC);
 }
 
 obs_properties_t *MOQService::Properties()
@@ -46,6 +47,13 @@ obs_properties_t *MOQService::Properties()
 	obs_property_list_add_int(draft, "16", MOQ_VERSION_DRAFT_16);
 	obs_property_list_add_int(draft, "18", MOQ_VERSION_DRAFT_18);
 	obs_property_set_long_description(draft, obs_module_text("Service.DraftVersion.Desc"));
+
+	obs_property_t *container = obs_properties_add_list(ppts, kSettingContainer,
+							    obs_module_text("Service.Container"), OBS_COMBO_TYPE_LIST,
+							    OBS_COMBO_FORMAT_STRING);
+	obs_property_list_add_string(container, "LOC", kContainerLOC);
+	obs_property_list_add_string(container, "CMAF", kContainerCMAF);
+	obs_property_set_long_description(container, obs_module_text("Service.Container.Desc"));
 
 	return ppts;
 }

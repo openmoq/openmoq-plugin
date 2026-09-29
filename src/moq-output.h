@@ -71,6 +71,7 @@ private:
 			bool ends_group);
 	bool ResolveServiceConfig();
 	bool LoadEndpointSettings(obs_service_t *service);
+	void LoadContainerSettings(obs_service_t *service);
 	bool Connect();
 
 	static void OnReady(void *ctx, moq_media_sender_t *sender);
@@ -114,8 +115,7 @@ private:
 	moq_media_track_t *video_track = nullptr;
 	moq_media_track_t *audio_track = nullptr;
 
-	// todo: make this configurable
-	bool cmaf_enabled = true;
+	bool cmaf_enabled = false;
 
 	CMAFPackagerPtr video_packager;
 	CMAFPackagerPtr audio_packager;

@@ -120,6 +120,13 @@ bool MOQOutput::LoadEndpointSettings(obs_service_t *service)
 	return true;
 }
 
+void MOQOutput::LoadContainerSettings(obs_service_t *service)
+{
+	OBSDataAutoRelease settings = obs_service_get_settings(service);
+	cmaf_enabled = strcmp(obs_data_get_string(settings, kSettingContainer), kContainerCMAF) == 0;
+	blog(LOG_INFO, "[obs-moq] using %s container", cmaf_enabled ? "CMAF" : "LOC");
+}
+
 bool MOQOutput::InitCMAFVideoPackager()
 {
 	obs_encoder_t *venc = obs_output_get_video_encoder(output);
@@ -180,6 +187,8 @@ bool MOQOutput::ResolveServiceConfig()
 
 	if (!LoadEndpointSettings(service))
 		return false;
+
+	LoadContainerSettings(service);
 
 	const char *server = obs_service_get_connect_info(service, OBS_SERVICE_CONNECT_INFO_SERVER_URL);
 	if (server && *server) {
