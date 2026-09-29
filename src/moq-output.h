@@ -29,6 +29,7 @@ struct video_config {
 	uint32_t video_height;
 	uint32_t fps_num;
 	uint32_t fps_den;
+	uint32_t keyint_sec; 
 	uint64_t bitrate;
 };
 
@@ -72,6 +73,7 @@ private:
 	bool ResolveServiceConfig();
 	bool LoadEndpointSettings(obs_service_t *service);
 	void LoadContainerSettings(obs_service_t *service);
+	void ResolveAudioGroupFrames(obs_encoder_t *aenc);
 	bool Connect();
 
 	static void OnReady(void *ctx, moq_media_sender_t *sender);
@@ -116,6 +118,9 @@ private:
 	moq_media_track_t *audio_track = nullptr;
 
 	bool cmaf_enabled = false;
+
+	uint32_t audio_group_frames = 0;
+	uint32_t audio_group_sent = 0;
 
 	CMAFPackagerPtr video_packager;
 	CMAFPackagerPtr audio_packager;

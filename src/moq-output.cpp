@@ -8,10 +8,15 @@
 #include <obs-avc.h>
 #include <obs-hevc.h>
 
+#include <algorithm>
+
 #define VIDEO_TIMESCALE 1000000u
 #define MOQ_HANDSHAKE_TIMEOUT_US 5000000ull
 
 #define CMAF_VIDEO_TIMESCALE 90000u
+
+#define AUDIO_GROUP_FRAMES_MAX 1024u
+#define AUDIO_GROUP_DEFAULT_SEC 1u
 
 MOQOutput::MOQOutput(obs_data_t *settings, obs_output_t *output) : output(output)
 {
@@ -57,6 +62,7 @@ bool MOQOutput::LoadVideoEncoderSettings()
 
 	OBSDataAutoRelease settings = obs_encoder_get_settings(venc);
 	video_conf.bitrate = (uint64_t)obs_data_get_int(settings, "bitrate") * 1000;
+	video_conf.keyint_sec = (uint32_t)obs_data_get_int(settings, "keyint_sec");
 
 	const char *codec = obs_encoder_get_codec(venc);
 	video_conf.video_width = obs_encoder_get_width(venc);
@@ -100,7 +106,19 @@ bool MOQOutput::LoadAudioEncoderSettings()
 	audio_init_data = BuildInitData(codec, extra, extra_size);
 	audio_codec = BuildCodecString(codec, audio_init_data);
 
+	ResolveAudioGroupFrames(aenc);
+
 	return true;
+}
+
+void MOQOutput::ResolveAudioGroupFrames(obs_encoder_t *aenc)
+{
+	const size_t frame_size = obs_encoder_get_frame_size(aenc);
+	const uint64_t group_sec = video_conf.keyint_sec ? video_conf.keyint_sec : AUDIO_GROUP_DEFAULT_SEC;
+	audio_group_frames = 1;
+	if (frame_size > 0 && audio_conf.samplerate > 0)
+		audio_group_frames = (uint32_t)std::clamp<uint64_t>(
+			(group_sec * audio_conf.samplerate + frame_size / 2) / frame_size, 1, AUDIO_GROUP_FRAMES_MAX);
 }
 
 bool MOQOutput::LoadEndpointSettings(obs_service_t *service)
@@ -437,6 +455,7 @@ bool MOQOutput::Start()
 	total_bytes_sent.store(0);
 	connect_time_ms.store(0);
 	start_time_ns = os_gettime_ns();
+	audio_group_sent = 0;
 
 	const int64_t wall_us = std::chrono::duration_cast<std::chrono::microseconds>(
 					std::chrono::system_clock::now().time_since_epoch())
@@ -599,7 +618,11 @@ void MOQOutput::Data(struct encoder_packet *packet)
 		SendPacket(packet, &video_track, packet->keyframe, packet->keyframe, false);
 	}
 	if (packet->type == OBS_ENCODER_AUDIO) {
-		SendPacket(packet, &audio_track, true, true, true);
+		const bool starts_group = audio_group_sent == 0;
+		const bool ends_group = ++audio_group_sent == audio_group_frames;
+		if (ends_group)
+			audio_group_sent = 0;
+		SendPacket(packet, &audio_track, true, starts_group, ends_group);
 	}
 }
 
