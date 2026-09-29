@@ -29,7 +29,7 @@ struct video_config {
 	uint32_t video_height;
 	uint32_t fps_num;
 	uint32_t fps_den;
-	uint32_t keyint_sec; 
+	uint32_t keyint_sec;
 	uint64_t bitrate;
 };
 
