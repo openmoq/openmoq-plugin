@@ -480,6 +480,7 @@ void MOQOutput::SendPacket(struct encoder_packet *packet, moq_media_track_t **tr
 		}
 
 		if (!*track && packet->type == OBS_ENCODER_VIDEO && packet->keyframe) {
+			// Expects annex-b, thus we don't use the reframed packet
 			*track = CreateVideoTrackFromPacket(sender, packet);
 		}
 
@@ -496,7 +497,7 @@ void MOQOutput::SendPacket(struct encoder_packet *packet, moq_media_track_t **tr
 		return;
 	}
 
-	total_bytes_sent.fetch_add(packet->size);
+	total_bytes_sent.fetch_add(payload_size);
 }
 
 void MOQOutput::Data(struct encoder_packet *packet)
