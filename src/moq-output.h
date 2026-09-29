@@ -2,6 +2,7 @@
 #include <obs-module.h>
 
 #include <chrono>
+#include <memory>
 #include <mutex>
 #include <thread>
 #include <atomic>
@@ -13,6 +14,13 @@
 #include <moq/rcbuf.h>
 #include <moq/media_object.h>
 #include <moq/media_sender.h>
+#include <moq/cmaf_packager.h>
+
+struct CMAFPackagerDeleter {
+	void operator()(moq_cmaf_packager_t *p) const { moq_cmaf_packager_destroy(p); }
+};
+
+using CMAFPackagerPtr = std::unique_ptr<moq_cmaf_packager_t, CMAFPackagerDeleter>;
 
 struct TrackCodec;
 
@@ -26,6 +34,7 @@ struct video_config {
 
 struct audio_config {
 	uint32_t samplerate;
+	uint32_t channel_count;
 	std::string channels;
 	uint64_t bitrate;
 };
@@ -53,6 +62,8 @@ private:
 	void SplitNamespace();
 	bool LoadVideoEncoderSettings();
 	bool LoadAudioEncoderSettings();
+	bool InitCMAFVideoPackager();
+	bool InitCMAFAudioPackager();
 	moq_media_track_t *CreateVideoTrack(moq_media_sender_t *new_sender);
 	moq_media_track_t *CreateVideoTrackFromPacket(moq_media_sender_t *cur_sender, struct encoder_packet *packet);
 	moq_media_track_t *CreateAudioTrack(moq_media_sender_t *new_sender);
@@ -102,6 +113,12 @@ private:
 	moq_media_sender_t *sender = nullptr;
 	moq_media_track_t *video_track = nullptr;
 	moq_media_track_t *audio_track = nullptr;
+
+	// todo: make this configurable
+	bool cmaf_enabled = true;
+
+	CMAFPackagerPtr video_packager;
+	CMAFPackagerPtr audio_packager;
 };
 
 void register_moq_output();
