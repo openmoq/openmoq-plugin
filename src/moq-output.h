@@ -106,6 +106,7 @@ private:
 
 	std::vector<uint8_t> audio_init_data;
 	std::string audio_codec;
+	const TrackCodec *audio_track_codec = nullptr;
 
 	std::string url;
 	moq_namespace_t namespace_val;

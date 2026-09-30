@@ -46,6 +46,7 @@ target_sources(
     src/obs-moq.cpp
     src/moq-output.cpp
     src/moq-output.h
+    src/codec.h
     src/codec-signaling.h
     src/moq-cmaf.h
     src/moq-service.cpp

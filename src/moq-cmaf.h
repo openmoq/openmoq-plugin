@@ -1,28 +1,10 @@
 #pragma once
 
 #include <cstdint>
-#include <cstring>
 
 #include <obs-module.h>
 
 #include "moq-output.h"
-
-static moq_cmaf_codec_kind_t codec_kind_from_name(const char *codec)
-{
-	if (!codec)
-		return MOQ_CMAF_CODEC_UNKNOWN;
-	if (strcmp(codec, "h264") == 0)
-		return MOQ_CMAF_CODEC_AVC;
-	if (strcmp(codec, "hevc") == 0)
-		return MOQ_CMAF_CODEC_HEVC;
-	if (strcmp(codec, "av1") == 0)
-		return MOQ_CMAF_CODEC_AV1;
-	if (strcmp(codec, "aac") == 0)
-		return MOQ_CMAF_CODEC_AAC;
-	if (strcmp(codec, "opus") == 0)
-		return MOQ_CMAF_CODEC_OPUS;
-	return MOQ_CMAF_CODEC_UNKNOWN;
-}
 
 static CMAFPackagerPtr create_packager(const moq_cmaf_packager_cfg_t *cfg, const char *codec)
 {

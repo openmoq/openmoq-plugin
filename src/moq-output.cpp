@@ -1,4 +1,5 @@
 #include "moq-output.h"
+#include "codec.h"
 #include "codec-signaling.h"
 #include "moq-service.h"
 #include "moq-cmaf.h"
@@ -56,7 +57,7 @@ bool MOQOutput::LoadVideoEncoderSettings()
 	obs_encoder_t *venc = obs_output_get_video_encoder(output);
 	if (!venc) {
 		blog(LOG_WARNING, "[obs-moq] no video encoder assigned");
-		obs_output_set_last_error(output, obs_module_text("Error.NoEncoder"));
+		obs_output_set_last_error(output, obs_module_text("Error.NoVideoEncoder"));
 		return false;
 	}
 
@@ -105,6 +106,7 @@ bool MOQOutput::LoadAudioEncoderSettings()
 	obs_encoder_get_extra_data(aenc, &extra, &extra_size);
 	audio_init_data = BuildInitData(codec, extra, extra_size);
 	audio_codec = BuildCodecString(codec, audio_init_data);
+	audio_track_codec = ResolveTrackCodec(codec);
 
 	ResolveAudioGroupFrames(aenc);
 
@@ -142,17 +144,19 @@ void MOQOutput::LoadContainerSettings(obs_service_t *service)
 {
 	OBSDataAutoRelease settings = obs_service_get_settings(service);
 	cmaf_enabled = strcmp(obs_data_get_string(settings, kSettingContainer), kContainerCMAF) == 0;
-	blog(LOG_INFO, "[obs-moq] using %s container", cmaf_enabled ? "CMAF" : "LOC");
 }
 
 bool MOQOutput::InitCMAFVideoPackager()
 {
-	obs_encoder_t *venc = obs_output_get_video_encoder(output);
-	const char *codec = venc ? obs_encoder_get_codec(venc) : nullptr;
+	if (!video_track_codec) {
+		blog(LOG_WARNING, "[obs-moq] CMAF: unsupported video codec");
+		obs_output_set_last_error(output, obs_module_text("Error.NoVideoEncoder"));
+		return false;
+	}
 
 	moq_cmaf_packager_cfg_t cfg;
 	moq_cmaf_packager_cfg_init(&cfg);
-	cfg.codec_kind = codec_kind_from_name(codec);
+	cfg.codec_kind = video_track_codec->cmaf_kind;
 	cfg.codec_config = {video_init_data.data(), video_init_data.size()};
 	cfg.timescale = CMAF_VIDEO_TIMESCALE;
 	cfg.width = video_conf.video_width;
@@ -161,9 +165,9 @@ bool MOQOutput::InitCMAFVideoPackager()
 	cfg.fps_den = video_conf.fps_den;
 	cfg.rebase_timestamps = true;
 
-	video_packager = create_packager(&cfg, codec);
+	video_packager = create_packager(&cfg, video_track_codec->sample_entry);
 	if (!video_packager) {
-		obs_output_set_last_error(output, obs_module_text("Error.NoEncoder"));
+		obs_output_set_last_error(output, obs_module_text("Error.NoVideoEncoder"));
 		return false;
 	}
 	return true;
@@ -171,12 +175,15 @@ bool MOQOutput::InitCMAFVideoPackager()
 
 bool MOQOutput::InitCMAFAudioPackager()
 {
-	obs_encoder_t *aenc = obs_output_get_audio_encoder(output, 0);
-	const char *codec = aenc ? obs_encoder_get_codec(aenc) : nullptr;
+	if (!audio_track_codec) {
+		blog(LOG_WARNING, "[obs-moq] CMAF: unsupported audio codec");
+		obs_output_set_last_error(output, obs_module_text("Error.NoAudioEncoder"));
+		return false;
+	}
 
 	moq_cmaf_packager_cfg_t cfg;
 	moq_cmaf_packager_cfg_init(&cfg);
-	cfg.codec_kind = codec_kind_from_name(codec);
+	cfg.codec_kind = audio_track_codec->cmaf_kind;
 	cfg.codec_config = {audio_init_data.data(), audio_init_data.size()};
 	cfg.timescale = 0;
 	cfg.samplerate = audio_conf.samplerate;
@@ -184,7 +191,7 @@ bool MOQOutput::InitCMAFAudioPackager()
 	cfg.avg_bitrate = static_cast<uint32_t>(audio_conf.bitrate);
 	cfg.rebase_timestamps = true;
 
-	audio_packager = create_packager(&cfg, codec);
+	audio_packager = create_packager(&cfg, audio_track_codec->sample_entry);
 	if (!audio_packager) {
 		obs_output_set_last_error(output, obs_module_text("Error.NoAudioEncoder"));
 		return false;
@@ -569,11 +576,11 @@ void MOQOutput::SendPacket(struct encoder_packet *packet, moq_media_track_t **tr
 		struct encoder_packet reframed;
 		bool did_reframe = false;
 		if (cmaf_enabled) {
-			/* The packager takes annex-b as is and reframes it itself. */
+			// The packager takes annex-b as is and reframes it itself
 			moq_cmaf_packager_t *packager = (packet->type == OBS_ENCODER_VIDEO) ? video_packager.get()
 											    : audio_packager.get();
 			if (!package_packet(packager, packet, &fragment)) {
-				blog(LOG_WARNING, "[obs-moq] dropping a packet that could not be packaged");
+				blog(LOG_DEBUG, "[obs-moq] dropping a packet that could not be packaged");
 				return;
 			}
 		} else if (ReframeAnnexB(video_track_codec, packet, &reframed)) {
@@ -593,7 +600,6 @@ void MOQOutput::SendPacket(struct encoder_packet *packet, moq_media_track_t **tr
 		}
 		obj.payload = payload;
 
-		/* Ownership transfers only on success. */
 		if (moq_media_sender_write(sender, *track, &obj) != MOQ_OK) {
 			moq_rcbuf_decref(payload);
 			return;
