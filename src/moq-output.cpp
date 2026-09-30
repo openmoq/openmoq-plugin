@@ -1,14 +1,23 @@
 #include "moq-output.h"
+#include "codec.h"
 #include "codec-signaling.h"
 #include "moq-service.h"
+#include "moq-cmaf.h"
 
 #include <util/platform.h>
 #include <obs.hpp>
 #include <obs-avc.h>
 #include <obs-hevc.h>
 
+#include <algorithm>
+
 #define VIDEO_TIMESCALE 1000000u
 #define MOQ_HANDSHAKE_TIMEOUT_US 5000000ull
+
+#define CMAF_VIDEO_TIMESCALE 90000u
+
+#define AUDIO_GROUP_FRAMES_MAX 1024u
+#define AUDIO_GROUP_DEFAULT_SEC 1u
 
 MOQOutput::MOQOutput(obs_data_t *settings, obs_output_t *output) : output(output)
 {
@@ -48,16 +57,15 @@ bool MOQOutput::LoadVideoEncoderSettings()
 	obs_encoder_t *venc = obs_output_get_video_encoder(output);
 	if (!venc) {
 		blog(LOG_WARNING, "[obs-moq] no video encoder assigned");
-		obs_output_set_last_error(output, obs_module_text("Error.NoEncoder"));
+		obs_output_set_last_error(output, obs_module_text("Error.NoVideoEncoder"));
 		return false;
 	}
 
 	OBSDataAutoRelease settings = obs_encoder_get_settings(venc);
 	video_conf.bitrate = (uint64_t)obs_data_get_int(settings, "bitrate") * 1000;
+	video_conf.keyint_sec = (uint32_t)obs_data_get_int(settings, "keyint_sec");
 
 	const char *codec = obs_encoder_get_codec(venc);
-	//todo: add codec validation here
-
 	video_conf.video_width = obs_encoder_get_width(venc);
 	video_conf.video_height = obs_encoder_get_height(venc);
 
@@ -66,11 +74,9 @@ bool MOQOutput::LoadVideoEncoderSettings()
 	video_conf.fps_num = ovi.fps_num;
 	video_conf.fps_den = ovi.fps_den;
 
-	//initialize init_data
 	uint8_t *extra = nullptr;
 	size_t extra_size = 0;
 	obs_encoder_get_extra_data(venc, &extra, &extra_size);
-
 	video_init_data = BuildInitData(codec, extra, extra_size);
 	video_codec = BuildCodecString(codec, video_init_data);
 	video_track_codec = ResolveTrackCodec(codec);
@@ -90,17 +96,31 @@ bool MOQOutput::LoadAudioEncoderSettings()
 	audio_conf.bitrate = (uint64_t)obs_data_get_int(settings, "bitrate") * 1000;
 	audio_t *audio = obs_encoder_audio(aenc);
 	audio_conf.samplerate = audio_output_get_sample_rate(audio);
-	audio_conf.channels = std::to_string(audio_output_get_channels(audio));
+	audio_conf.channel_count = (uint32_t)audio_output_get_channels(audio);
+	audio_conf.channels = std::to_string(audio_conf.channel_count);
 
 	const char *codec = obs_encoder_get_codec(aenc);
-	//todo: add codec validation here
+
 	uint8_t *extra = nullptr;
 	size_t extra_size = 0;
 	obs_encoder_get_extra_data(aenc, &extra, &extra_size);
 	audio_init_data = BuildInitData(codec, extra, extra_size);
 	audio_codec = BuildCodecString(codec, audio_init_data);
+	audio_track_codec = ResolveTrackCodec(codec);
+
+	ResolveAudioGroupFrames(aenc);
 
 	return true;
+}
+
+void MOQOutput::ResolveAudioGroupFrames(obs_encoder_t *aenc)
+{
+	const size_t frame_size = obs_encoder_get_frame_size(aenc);
+	const uint64_t group_sec = video_conf.keyint_sec ? video_conf.keyint_sec : AUDIO_GROUP_DEFAULT_SEC;
+	audio_group_frames = 1;
+	if (frame_size > 0 && audio_conf.samplerate > 0)
+		audio_group_frames = (uint32_t)std::clamp<uint64_t>(
+			(group_sec * audio_conf.samplerate + frame_size / 2) / frame_size, 1, AUDIO_GROUP_FRAMES_MAX);
 }
 
 bool MOQOutput::LoadEndpointSettings(obs_service_t *service)
@@ -120,6 +140,65 @@ bool MOQOutput::LoadEndpointSettings(obs_service_t *service)
 	return true;
 }
 
+void MOQOutput::LoadContainerSettings(obs_service_t *service)
+{
+	OBSDataAutoRelease settings = obs_service_get_settings(service);
+	cmaf_enabled = strcmp(obs_data_get_string(settings, kSettingContainer), kContainerCMAF) == 0;
+}
+
+bool MOQOutput::InitCMAFVideoPackager()
+{
+	if (!video_track_codec) {
+		blog(LOG_WARNING, "[obs-moq] CMAF: unsupported video codec");
+		obs_output_set_last_error(output, obs_module_text("Error.NoVideoEncoder"));
+		return false;
+	}
+
+	moq_cmaf_packager_cfg_t cfg;
+	moq_cmaf_packager_cfg_init(&cfg);
+	cfg.codec_kind = video_track_codec->cmaf_kind;
+	cfg.codec_config = {video_init_data.data(), video_init_data.size()};
+	cfg.timescale = CMAF_VIDEO_TIMESCALE;
+	cfg.width = video_conf.video_width;
+	cfg.height = video_conf.video_height;
+	cfg.fps_num = video_conf.fps_num;
+	cfg.fps_den = video_conf.fps_den;
+	cfg.rebase_timestamps = true;
+
+	video_packager = create_packager(&cfg, video_track_codec->sample_entry);
+	if (!video_packager) {
+		obs_output_set_last_error(output, obs_module_text("Error.NoVideoEncoder"));
+		return false;
+	}
+	return true;
+}
+
+bool MOQOutput::InitCMAFAudioPackager()
+{
+	if (!audio_track_codec) {
+		blog(LOG_WARNING, "[obs-moq] CMAF: unsupported audio codec");
+		obs_output_set_last_error(output, obs_module_text("Error.NoAudioEncoder"));
+		return false;
+	}
+
+	moq_cmaf_packager_cfg_t cfg;
+	moq_cmaf_packager_cfg_init(&cfg);
+	cfg.codec_kind = audio_track_codec->cmaf_kind;
+	cfg.codec_config = {audio_init_data.data(), audio_init_data.size()};
+	cfg.timescale = 0;
+	cfg.samplerate = audio_conf.samplerate;
+	cfg.channel_count = audio_conf.channel_count;
+	cfg.avg_bitrate = static_cast<uint32_t>(audio_conf.bitrate);
+	cfg.rebase_timestamps = true;
+
+	audio_packager = create_packager(&cfg, audio_track_codec->sample_entry);
+	if (!audio_packager) {
+		obs_output_set_last_error(output, obs_module_text("Error.NoAudioEncoder"));
+		return false;
+	}
+	return true;
+}
+
 bool MOQOutput::ResolveServiceConfig()
 {
 	url.clear();
@@ -133,6 +212,8 @@ bool MOQOutput::ResolveServiceConfig()
 
 	if (!LoadEndpointSettings(service))
 		return false;
+
+	LoadContainerSettings(service);
 
 	const char *server = obs_service_get_connect_info(service, OBS_SERVICE_CONNECT_INFO_SERVER_URL);
 	if (server && *server) {
@@ -168,12 +249,20 @@ moq_media_track_t *MOQOutput::CreateVideoTrack(moq_media_sender_t *new_sender)
 	moq_media_track_cfg_init(&tcfg);
 	tcfg.name = {(const uint8_t *)"video", 5};
 	tcfg.media_type = MOQ_MEDIA_TYPE_VIDEO;
-	// todo: make this configurable and add CMAF support
-	tcfg.packaging = MOQ_MEDIA_PACKAGING_RAW;
+	tcfg.packaging = cmaf_enabled ? MOQ_MEDIA_PACKAGING_CMAF : MOQ_MEDIA_PACKAGING_RAW;
 	tcfg.codec = {(const uint8_t *)video_codec.c_str(), video_codec.size()};
-	tcfg.timescale = VIDEO_TIMESCALE;
-	// todo: analyze actual need for this and how it fits w/other codecs
-	tcfg.init_data = {video_init_data.data(), video_init_data.size()};
+
+	if (cmaf_enabled) {
+		if (!InitCMAFVideoPackager())
+			return nullptr;
+
+		tcfg.init_data = moq_cmaf_packager_init_segment(video_packager.get());
+		tcfg.timescale = moq_cmaf_packager_timescale(video_packager.get());
+	} else {
+		tcfg.init_data = {video_init_data.data(), video_init_data.size()};
+		tcfg.timescale = VIDEO_TIMESCALE;
+	}
+
 	tcfg.is_live = true;
 	tcfg.width = video_conf.video_width;
 	tcfg.height = video_conf.video_height;
@@ -206,6 +295,7 @@ moq_media_track_t *MOQOutput::CreateVideoTrackFromPacket(moq_media_sender_t *cur
 	moq_media_track_t *new_track = CreateVideoTrack(cur_sender);
 	if (!new_track) {
 		blog(LOG_WARNING, "[obs-moq] failed to create video track from first frame");
+		video_packager.reset();
 		return nullptr;
 	}
 
@@ -220,11 +310,20 @@ moq_media_track_t *MOQOutput::CreateAudioTrack(moq_media_sender_t *new_sender)
 	moq_media_track_cfg_init(&tcfg);
 	tcfg.name = {(const uint8_t *)"audio", 5};
 	tcfg.media_type = MOQ_MEDIA_TYPE_AUDIO;
-	tcfg.packaging = MOQ_MEDIA_PACKAGING_RAW;
+	tcfg.packaging = cmaf_enabled ? MOQ_MEDIA_PACKAGING_CMAF : MOQ_MEDIA_PACKAGING_RAW;
 	tcfg.codec = {(const uint8_t *)audio_codec.c_str(), audio_codec.size()};
 	tcfg.samplerate = audio_conf.samplerate;
 	tcfg.channel_config = {(const uint8_t *)audio_conf.channels.c_str(), audio_conf.channels.size()};
 	tcfg.bitrate = audio_conf.bitrate;
+
+	if (cmaf_enabled) {
+		if (!InitCMAFAudioPackager())
+			return nullptr;
+
+		tcfg.init_data = moq_cmaf_packager_init_segment(audio_packager.get());
+		tcfg.timescale = moq_cmaf_packager_timescale(audio_packager.get());
+	}
+
 	moq_media_track_t *new_track = nullptr;
 	moq_result_t result = moq_media_sender_add_track(new_sender, &tcfg, &new_track);
 	if (result != MOQ_OK) {
@@ -363,6 +462,7 @@ bool MOQOutput::Start()
 	total_bytes_sent.store(0);
 	connect_time_ms.store(0);
 	start_time_ns = os_gettime_ns();
+	audio_group_sent = 0;
 
 	const int64_t wall_us = std::chrono::duration_cast<std::chrono::microseconds>(
 					std::chrono::system_clock::now().time_since_epoch())
@@ -403,6 +503,9 @@ void MOQOutput::Stop(bool signal)
 		moq_media_sender_destroy(doomed);
 	}
 
+	video_packager.reset();
+	audio_packager.reset();
+
 	if (signal) {
 		obs_output_signal_stop(output, OBS_OUTPUT_SUCCESS);
 	}
@@ -435,34 +538,14 @@ static bool ReframeAnnexB(const TrackCodec *video_codec, struct encoder_packet *
 void MOQOutput::SendPacket(struct encoder_packet *packet, moq_media_track_t **track, bool is_sync, bool starts_group,
 			   bool ends_group)
 {
-	struct encoder_packet reframed;
-	bool did_reframe = ReframeAnnexB(video_track_codec, packet, &reframed);
-	const uint8_t *payload_data = did_reframe ? reframed.data : packet->data;
-	size_t payload_size = did_reframe ? reframed.size : packet->size;
-
-	moq_rcbuf_t *payload = nullptr;
-	// moq_rcbuf_create will copy the data into a new rcbuf, and increment the refcount. We will need to decref it after sending, or if we don't send it.
-	moq_result_t alloc_result = moq_rcbuf_create(moq_alloc_default(), payload_data, payload_size, &payload);
-	if (did_reframe) {
-		obs_encoder_packet_release(&reframed);
-	}
-	if (alloc_result != MOQ_OK) {
-		blog(LOG_WARNING, "[obs-moq] rcbuf alloc failed");
-		return;
-	}
-
-	uint64_t pts_usec = 0;
-	pts_usec = util_mul_div64((uint64_t)packet->pts, 1000000ull * (uint64_t)packet->timebase_num,
-				  (uint64_t)packet->timebase_den);
-
 	moq_media_send_object_t obj = {};
 	obj.struct_size = sizeof(obj);
-	obj.payload = payload;
 	obj.properties = nullptr;
 	obj.is_sync = is_sync;
 	obj.starts_group = starts_group;
 	obj.ends_group = ends_group;
-	obj.presentation_time_us = pts_usec;
+	obj.presentation_time_us = util_mul_div64((uint64_t)packet->pts, 1000000ull * (uint64_t)packet->timebase_num,
+						  (uint64_t)packet->timebase_den);
 	obj.decode_time_us = (uint64_t)packet->dts_usec;
 
 	const int64_t capture_us = (int64_t)packet->sys_dts_usec + epoch_offset_us;
@@ -471,33 +554,60 @@ void MOQOutput::SendPacket(struct encoder_packet *packet, moq_media_track_t **tr
 		obj.capture_time_us = (uint64_t)capture_us;
 	}
 
-	moq_result_t res;
+	if (cmaf_enabled && starts_group) {
+		obj.has_sap_type = true;
+		obj.sap_type = MOQ_SAP_TYPE_1;
+	}
+
+	size_t sent_size = 0;
 	{
 		std::lock_guard<std::mutex> lock(sender_mutex);
-		if (!sender) {
-			moq_rcbuf_decref(payload);
+		if (!sender)
 			return;
-		}
 
-		if (!*track && packet->type == OBS_ENCODER_VIDEO && packet->keyframe) {
-			// Expects annex-b, thus we don't use the reframed packet
+		// Expects annex-b, thus we don't use the reframed packet
+		if (!*track && packet->type == OBS_ENCODER_VIDEO && packet->keyframe)
 			*track = CreateVideoTrackFromPacket(sender, packet);
+
+		if (!*track)
+			return;
+
+		moq_bytes_t fragment = {packet->data, packet->size};
+		struct encoder_packet reframed;
+		bool did_reframe = false;
+		if (cmaf_enabled) {
+			// The packager takes annex-b as is and reframes it itself
+			moq_cmaf_packager_t *packager = (packet->type == OBS_ENCODER_VIDEO) ? video_packager.get()
+											    : audio_packager.get();
+			if (!package_packet(packager, packet, &fragment)) {
+				blog(LOG_DEBUG, "[obs-moq] dropping a packet that could not be packaged");
+				return;
+			}
+		} else if (ReframeAnnexB(video_track_codec, packet, &reframed)) {
+			did_reframe = true;
+			fragment = {reframed.data, reframed.size};
 		}
 
-		if (!*track) {
+		moq_rcbuf_t *payload = nullptr;
+		// moq_rcbuf_create will copy the data into a new rcbuf, and increment the refcount. We will need to decref it after sending, or if we don't send it.
+		moq_result_t alloc_result =
+			moq_rcbuf_create(moq_alloc_default(), fragment.data, fragment.len, &payload);
+		if (did_reframe)
+			obs_encoder_packet_release(&reframed);
+		if (alloc_result != MOQ_OK) {
+			blog(LOG_WARNING, "[obs-moq] rcbuf alloc failed");
+			return;
+		}
+		obj.payload = payload;
+
+		if (moq_media_sender_write(sender, *track, &obj) != MOQ_OK) {
 			moq_rcbuf_decref(payload);
 			return;
 		}
-
-		res = moq_media_sender_write(sender, *track, &obj);
+		sent_size = fragment.len;
 	}
 
-	if (res != MOQ_OK) {
-		moq_rcbuf_decref(payload);
-		return;
-	}
-
-	total_bytes_sent.fetch_add(payload_size);
+	total_bytes_sent.fetch_add(sent_size);
 }
 
 void MOQOutput::Data(struct encoder_packet *packet)
@@ -515,7 +625,11 @@ void MOQOutput::Data(struct encoder_packet *packet)
 		SendPacket(packet, &video_track, packet->keyframe, packet->keyframe, false);
 	}
 	if (packet->type == OBS_ENCODER_AUDIO) {
-		SendPacket(packet, &audio_track, true, true, true);
+		const bool starts_group = audio_group_sent == 0;
+		const bool ends_group = ++audio_group_sent == audio_group_frames;
+		if (ends_group)
+			audio_group_sent = 0;
+		SendPacket(packet, &audio_track, true, starts_group, ends_group);
 	}
 }
 

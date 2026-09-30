@@ -4,8 +4,9 @@
 # branch/tag name; either way the CI cache is keyed on the SHA it resolves
 # to, so a moving branch still triggers a rebuild.
 #
-# The plugin needs the codec-signaling helpers and the sized config
-# initializers, which are not in openmoq/moq5 yet (proposed upstream as
-# openmoq/moq5#5), so it tracks the qualabs fork for now.
-MOQ5_REPO=https://github.com/qualabs/moq5.git
-MOQ5_REF=fix/hevc-temporal-sublayers
+# The plugin needs the CMAF packager, which is not in openmoq/moq5 main yet
+# (proposed as openmoq/moq5#12). It tracks that PR's merge ref, i.e. the PR on
+# top of current main, so fixes already on main (such as HEVC temporal
+# sub-layers) are kept. Switch to main once the PR lands.
+MOQ5_REPO=https://github.com/openmoq/moq5.git
+MOQ5_REF=refs/pull/12/merge
