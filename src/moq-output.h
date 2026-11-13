@@ -36,6 +36,7 @@ struct video_config {
 struct audio_config {
 	uint32_t samplerate;
 	uint32_t channel_count;
+	uint32_t frame_size;
 	std::string channels;
 	uint64_t bitrate;
 };
@@ -125,6 +126,8 @@ private:
 
 	CMAFPackagerPtr video_packager;
 	CMAFPackagerPtr audio_packager;
+	uint32_t video_sample_duration = 0;
+	std::vector<uint8_t> cmaf_scratch;
 };
 
 void register_moq_output();

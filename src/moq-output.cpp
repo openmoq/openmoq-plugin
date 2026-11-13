@@ -95,7 +95,7 @@ bool MOQOutput::LoadAudioEncoderSettings()
 	OBSDataAutoRelease settings = obs_encoder_get_settings(aenc);
 	audio_conf.bitrate = (uint64_t)obs_data_get_int(settings, "bitrate") * 1000;
 	audio_t *audio = obs_encoder_audio(aenc);
-	audio_conf.samplerate = audio_output_get_sample_rate(audio);
+	audio_conf.samplerate = obs_encoder_get_sample_rate(aenc);
 	audio_conf.channel_count = (uint32_t)audio_output_get_channels(audio);
 	audio_conf.channels = std::to_string(audio_conf.channel_count);
 
@@ -116,6 +116,7 @@ bool MOQOutput::LoadAudioEncoderSettings()
 void MOQOutput::ResolveAudioGroupFrames(obs_encoder_t *aenc)
 {
 	const size_t frame_size = obs_encoder_get_frame_size(aenc);
+	audio_conf.frame_size = (uint32_t)frame_size;
 	const uint64_t group_sec = video_conf.keyint_sec ? video_conf.keyint_sec : AUDIO_GROUP_DEFAULT_SEC;
 	audio_group_frames = 1;
 	if (frame_size > 0 && audio_conf.samplerate > 0)
@@ -156,14 +157,23 @@ bool MOQOutput::InitCMAFVideoPackager()
 
 	moq_cmaf_packager_cfg_t cfg;
 	moq_cmaf_packager_cfg_init(&cfg);
-	cfg.codec_kind = video_track_codec->cmaf_kind;
+	cfg.sample_entry = video_track_codec->cmaf_entry;
+	cfg.sample_format = video_track_codec->cmaf_format;
 	cfg.codec_config = {video_init_data.data(), video_init_data.size()};
 	cfg.timescale = CMAF_VIDEO_TIMESCALE;
 	cfg.width = video_conf.video_width;
 	cfg.height = video_conf.video_height;
-	cfg.fps_num = video_conf.fps_num;
-	cfg.fps_den = video_conf.fps_den;
+	// OBS advances pts/dts by fps_den per frame, so they are already in 1/fps_num units.
+	cfg.source_timebase_num = 1;
+	cfg.source_timebase_den = video_conf.fps_num;
 	cfg.rebase_timestamps = true;
+
+	video_sample_duration =
+		video_conf.fps_num
+			? (uint32_t)((uint64_t)CMAF_VIDEO_TIMESCALE * video_conf.fps_den / video_conf.fps_num)
+			: 0;
+	if (video_sample_duration == 0)
+		video_sample_duration = 1;
 
 	video_packager = create_packager(&cfg, video_track_codec->sample_entry);
 	if (!video_packager) {
@@ -183,7 +193,14 @@ bool MOQOutput::InitCMAFAudioPackager()
 
 	moq_cmaf_packager_cfg_t cfg;
 	moq_cmaf_packager_cfg_init(&cfg);
-	cfg.codec_kind = audio_track_codec->cmaf_kind;
+	if (audio_conf.frame_size == 0) {
+		blog(LOG_WARNING, "[obs-moq] CMAF: the audio encoder does not report a frame size");
+		obs_output_set_last_error(output, obs_module_text("Error.NoAudioEncoder"));
+		return false;
+	}
+
+	cfg.sample_entry = audio_track_codec->cmaf_entry;
+	cfg.sample_format = audio_track_codec->cmaf_format;
 	cfg.codec_config = {audio_init_data.data(), audio_init_data.size()};
 	cfg.timescale = 0;
 	cfg.samplerate = audio_conf.samplerate;
@@ -576,10 +593,11 @@ void MOQOutput::SendPacket(struct encoder_packet *packet, moq_media_track_t **tr
 		struct encoder_packet reframed;
 		bool did_reframe = false;
 		if (cmaf_enabled) {
-			// The packager takes annex-b as is and reframes it itself
-			moq_cmaf_packager_t *packager = (packet->type == OBS_ENCODER_VIDEO) ? video_packager.get()
-											    : audio_packager.get();
-			if (!package_packet(packager, packet, &fragment)) {
+			const bool is_video = packet->type == OBS_ENCODER_VIDEO;
+			moq_cmaf_packager_t *packager = is_video ? video_packager.get() : audio_packager.get();
+			const TrackCodec *codec = is_video ? video_track_codec : audio_track_codec;
+			const uint32_t duration = is_video ? video_sample_duration : audio_conf.frame_size;
+			if (!package_packet(packager, codec, packet, duration, cmaf_scratch, &fragment)) {
 				blog(LOG_DEBUG, "[obs-moq] dropping a packet that could not be packaged");
 				return;
 			}
