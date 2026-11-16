@@ -8,7 +8,7 @@ This is an OpenMOQ plugin for OBS that streams video over [MOQ](https://datatrac
 
 ## Dependencies
 
-* [libmoq](https://github.com/openmoq/moq5) (openmoq/moq5), MOQ protocol implementation, built with the `service` component. Must be built from [PR #12](https://github.com/openmoq/moq5/pull/12), which adds the CMAF packager (see [Required libmoq revision](#required-libmoq-revision) below).
+* [libmoq](https://github.com/openmoq/moq5) (openmoq/moq5), MOQ protocol implementation, built with the `service` component. Must be built with the CMAF packager enabled (see [Required libmoq revision](#required-libmoq-revision) below).
 * [OBS Studio fork with dynamic service registration](https://github.com/obsproject/obs-studio/pull/12911), required to use this plugin (see [Required OBS fork](#required-obs-fork) below).
 * CMake 3.28+
 * A C++ compiler with C++17 support (GCC 13+, Clang, or MSVC)
@@ -21,18 +21,9 @@ Until that PR is merged, you'll need to build OBS Studio from that PR's branch/f
 
 ### Required libmoq revision
 
-This plugin links against libmoq's CMAF packager (`moq::cmaf-packager`), which is not in openmoq/moq5 `main` yet: it is proposed upstream as [PR #12](https://github.com/openmoq/moq5/pull/12). The plugin will **not** build against `main` until that PR lands.
+This plugin links against libmoq's CMAF packager (`moq::cmaf-packager`). It is part of openmoq/moq5 `main`, but it is not built by default: libmoq has to be configured with `-DMOQ_BUILD_CMAF_PACKAGER=ON`, as in the build steps below.
 
-Check out the PR merged on top of current `main`, the same revision CI builds against:
-
-```bash
-git clone https://github.com/openmoq/moq5.git
-cd moq5
-git fetch origin refs/pull/12/merge
-git checkout FETCH_HEAD
-```
-
-Then follow the build steps below from that checkout. The revision CI builds against is pinned in [`.github/scripts/.libmoq-version`](.github/scripts/.libmoq-version) and it is temporarily `refs/pull/12/merge`.
+The revision CI builds against is pinned in [`.github/scripts/.libmoq-version`](.github/scripts/.libmoq-version), currently `main`.
 
 ### Building libmoq (openmoq/moq5)
 
@@ -53,6 +44,7 @@ cmake -S . -B build \
   -DMOQ_BUILD_SERVICE=ON \
   -DMOQ_BUILD_MSF=ON \
   -DMOQ_BUILD_MEDIA_OBJECT=ON \
+  -DMOQ_BUILD_CMAF_PACKAGER=ON \
   -DMOQ_BUILD_ADAPTER_PICOQUIC=ON \
   -DMOQ_BUILD_PQ_THREADED=ON \
   -DMOQ_BUILD_TESTS=OFF \
