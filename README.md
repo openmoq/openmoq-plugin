@@ -8,7 +8,7 @@ This is an OpenMOQ plugin for OBS that streams video over [MOQ](https://datatrac
 
 ## Dependencies
 
-* [libmoq](https://github.com/openmoq/moq5) (openmoq/moq5), MOQ protocol implementation, built with the `service` component. Must be built from the [qualabs/moq5](https://github.com/qualabs/moq5) fork, whose codec-signaling work is proposed upstream as [PR #5](https://github.com/openmoq/moq5/pull/5) (see [Required libmoq fork](#required-libmoq-fork) below).
+* [libmoq](https://github.com/openmoq/moq5) (openmoq/moq5), MOQ protocol implementation, built with the `service` component (see [Building libmoq](#building-libmoq-openmoqmoq5) below).
 * [OBS Studio fork with dynamic service registration](https://github.com/obsproject/obs-studio/pull/12911), required to use this plugin (see [Required OBS fork](#required-obs-fork) below).
 * CMake 3.28+
 * A C++ compiler with C++17 support (GCC 13+, Clang, or MSVC)
@@ -19,20 +19,16 @@ To use this plugin, OBS Studio needs support for dynamically detecting services 
 
 Until that PR is merged, you'll need to build OBS Studio from that PR's branch/fork to be able to select and configure this plugin's service from the OBS UI.
 
-### Required libmoq fork
-
-This plugin currently requires a fork of libmoq (openmoq/moq5): [qualabs/moq5](https://github.com/qualabs/moq5), whose codec-signaling helpers and sized config initializers are proposed upstream as [PR #5](https://github.com/openmoq/moq5/pull/5). The plugin will **not** build against upstream `moq5` as-is.
-
-```bash
-git clone https://github.com/qualabs/moq5.git
-cd moq5
-```
-
-Then follow the build steps below from that checkout. The revision CI builds against is pinned in [`.github/scripts/.libmoq-version`](.github/scripts/.libmoq-version) and it is temporarily the `fix/hevc-temporal-sublayers` branch.
-
 ### Building libmoq (openmoq/moq5)
 
 This plugin links against libmoq (openmoq/moq5) (`find_package(libmoq REQUIRED COMPONENTS service)`). libmoq must be built and installed on the system **before** configuring this plugin.
+
+```bash
+git clone https://github.com/openmoq/moq5.git
+cd moq5
+```
+
+Then follow the build steps below from that checkout. The revision CI builds against is pinned in [`.github/scripts/.libmoq-version`](.github/scripts/.libmoq-version).
 
 #### 1. Build and install libmoq
 

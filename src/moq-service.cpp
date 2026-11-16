@@ -2,6 +2,7 @@
 
 #include <cstring>
 #include <obs.hpp>
+#include <vector>
 
 #include <moq/session.h>
 
@@ -38,13 +39,15 @@ obs_properties_t *MOQService::Properties()
 		obs_properties_add_bool(ppts, kSettingSkipTlsVerify, obs_module_text("Service.SkipTlsVerify"));
 	obs_property_set_long_description(skip_tls, obs_module_text("Service.SkipTlsVerify.Desc"));
 
-	// Mirrors the drafts libmoq supports, it exposes no API to enumerate them.
 	obs_property_t *draft = obs_properties_add_list(ppts, kSettingDraftVersion,
 							obs_module_text("Service.DraftVersion"), OBS_COMBO_TYPE_LIST,
 							OBS_COMBO_FORMAT_INT);
 	obs_property_list_add_int(draft, obs_module_text("Service.DraftVersion.Auto"), 0);
-	obs_property_list_add_int(draft, "16", MOQ_VERSION_DRAFT_16);
-	obs_property_list_add_int(draft, "18", MOQ_VERSION_DRAFT_18);
+
+	std::vector<moq_version_t> versions(moq_versions_supported(nullptr, 0));
+	moq_versions_supported(versions.data(), versions.size());
+	for (moq_version_t version : versions)
+		obs_property_list_add_int(draft, std::to_string(version).c_str(), version);
 	obs_property_set_long_description(draft, obs_module_text("Service.DraftVersion.Desc"));
 
 	return ppts;
