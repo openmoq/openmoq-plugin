@@ -4,9 +4,8 @@
 # branch/tag name; either way the CI cache is keyed on the SHA it resolves
 # to, so a moving branch still triggers a rebuild.
 #
-# The plugin needs the CMAF packager, which is not in openmoq/moq5 main yet
-# (proposed as openmoq/moq5#12). It tracks that PR's merge ref, i.e. the PR on
-# top of current main, so fixes already on main (such as HEVC temporal
-# sub-layers) are kept. Switch to main once the PR lands.
+# The plugin needs the CMAF packager (media/cmaf_packager), which is on
+# openmoq/moq5 main but off by default: build-libmoq turns it on with
+# MOQ_BUILD_CMAF_PACKAGER=ON.
 MOQ5_REPO=https://github.com/openmoq/moq5.git
-MOQ5_REF=refs/pull/12/merge
+MOQ5_REF=main
