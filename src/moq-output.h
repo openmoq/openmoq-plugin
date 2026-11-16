@@ -50,7 +50,7 @@ public:
 
 private:
 	void StartThread();
-	void SplitNamespace();
+	bool SplitNamespace(std::string &error);
 	bool LoadVideoEncoderSettings();
 	bool LoadAudioEncoderSettings();
 	moq_media_track_t *CreateVideoTrack(moq_media_sender_t *new_sender);

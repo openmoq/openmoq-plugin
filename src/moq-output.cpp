@@ -26,21 +26,82 @@ MOQOutput::~MOQOutput()
 	}
 }
 
-void MOQOutput::SplitNamespace()
+static bool IsNamespaceLiteral(int c)
+{
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+}
+
+static int NamespaceHexDigit(int c)
+{
+	if (c >= '0' && c <= '9')
+		return c - '0';
+	if (c >= 'a' && c <= 'f')
+		return c - 'a' + 10;
+	return -1;
+}
+
+static bool DecodeNamespaceField(char *field, size_t &len, std::string &error)
+{
+	char msg[64];
+	size_t in = 0;
+	size_t out = 0;
+
+	while (in < len) {
+		int c = (unsigned char)field[in];
+
+		if (IsNamespaceLiteral(c)) {
+			field[out++] = field[in++];
+			continue;
+		}
+		if (c != '.') {
+			if (c > ' ' && c < 0x7f)
+				snprintf(msg, sizeof(msg), "write '%c' as .%02x", c, c);
+			else
+				snprintf(msg, sizeof(msg), "write byte 0x%02x as .%02x", c, c);
+			error = msg;
+			return false;
+		}
+
+		int hi = in + 1 < len ? NamespaceHexDigit((unsigned char)field[in + 1]) : -1;
+		int lo = hi < 0 || in + 2 >= len ? -1 : NamespaceHexDigit((unsigned char)field[in + 2]);
+		if (lo < 0) {
+			error = "'.' must be followed by two lowercase hex digits";
+			return false;
+		}
+
+		c = hi << 4 | lo;
+		if (IsNamespaceLiteral(c)) {
+			snprintf(msg, sizeof(msg), "write .%c%c as '%c'", field[in + 1], field[in + 2], c);
+			error = msg;
+			return false;
+		}
+		field[out++] = (char)c;
+		in += 3;
+	}
+	len = out;
+	return true;
+}
+
+bool MOQOutput::SplitNamespace(std::string &error)
 {
 	ns_bytes.clear();
-	const char *base = stream_key.data();
+	char *base = stream_key.data();
 	size_t start = 0;
 	for (size_t i = 0; i <= stream_key.size(); ++i) {
 		bool sep = (i == stream_key.size()) || stream_key[i] == '-';
 		if (sep) {
-			if (i > start)
-				ns_bytes.push_back({(const uint8_t *)(base + start), i - start});
+			if (i > start) {
+				size_t len = i - start;
+				if (!DecodeNamespaceField(base + start, len, error))
+					return false;
+				ns_bytes.push_back({(const uint8_t *)(base + start), len});
+			}
 			start = i + 1;
 		}
 	}
 	namespace_val.parts = ns_bytes.data();
 	namespace_val.count = ns_bytes.size();
+	return true;
 }
 
 bool MOQOutput::LoadVideoEncoderSettings()
@@ -157,7 +218,12 @@ bool MOQOutput::ResolveServiceConfig()
 		return false;
 	}
 
-	SplitNamespace();
+	std::string ns_error;
+	if (!SplitNamespace(ns_error)) {
+		blog(LOG_WARNING, "[obs-moq] invalid namespace '%s': %s", key, ns_error.c_str());
+		obs_output_signal_stop(output, OBS_OUTPUT_BAD_PATH);
+		return false;
+	}
 
 	return true;
 }
