@@ -40,6 +40,9 @@ bool extra_canvas_resolve(const char *uuid, extra_canvas_info *info)
 		return false;
 	}
 
+	const char *name = obs_canvas_get_name(canvas);
+	info->name = name ? name : "";
+
 	video_t *video = obs_canvas_get_video(canvas);
 	struct obs_video_info ovi = {};
 	obs_canvas_get_video_info(canvas, &ovi);

@@ -58,6 +58,8 @@ struct MOQVideoTrack {
 	std::string codec;
 	const TrackCodec *track_codec = nullptr;
 
+	std::string label;
+
 	CMAFPackagerPtr packager;
 	uint32_t sample_duration = 0;
 
@@ -81,7 +83,7 @@ private:
 	void StartThread();
 	bool SplitNamespace(std::string &error);
 	bool LoadVideoTracks();
-	bool AddVideoTrack(size_t encoder_idx, bool multitrack);
+	bool AddVideoTrack(size_t encoder_idx, bool multitrack, const std::string &label);
 	bool LoadVideoEncoderSettings(MOQVideoTrack &vt);
 	bool LoadAudioEncoderSettings();
 	bool InitCMAFVideoPackager(MOQVideoTrack &vt);
@@ -124,6 +126,7 @@ private:
 	std::atomic<bool> got_ready;
 
 	std::vector<obs_encoder_t *> extra_encoders;
+	std::vector<std::string> extra_canvas_names;
 
 	audio_config audio_conf;
 	endpoint_config endpoint_conf;

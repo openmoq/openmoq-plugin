@@ -358,6 +358,7 @@ bool MOQOutput::SetupExtraVideo(const std::vector<std::string> &canvas_uuids)
 
 		obs_encoder_set_video(venc, canvas.video);
 		extra_encoders.push_back(venc);
+		extra_canvas_names.push_back(canvas.name);
 	}
 
 	for (size_t i = 0; i < extra_encoders.size(); i++) {
@@ -381,6 +382,7 @@ void MOQOutput::ReleaseExtraVideo()
 	for (obs_encoder_t *venc : extra_encoders)
 		obs_encoder_release(venc);
 	extra_encoders.clear();
+	extra_canvas_names.clear();
 }
 
 obs_encoder_group_t *MOQOutput::CreateEncoderGroup()
@@ -414,11 +416,12 @@ static void log_video_track(const MOQVideoTrack &vt)
 	if (vt.has_alt_group)
 		snprintf(alt_group_str, sizeof(alt_group_str), "%d", vt.alt_group);
 
-	blog(LOG_INFO, "[obs-moq] video track '%s' from encoder slot %zu (%ux%u, altGroup %s)", vt.name.c_str(),
-	     vt.encoder_idx, vt.conf.video_width, vt.conf.video_height, alt_group_str);
+	blog(LOG_INFO, "[obs-moq] video track '%s' from encoder slot %zu (%ux%u, altGroup %s, label '%s')",
+	     vt.name.c_str(), vt.encoder_idx, vt.conf.video_width, vt.conf.video_height, alt_group_str,
+	     vt.label.c_str());
 }
 
-bool MOQOutput::AddVideoTrack(size_t encoder_idx, bool multitrack)
+bool MOQOutput::AddVideoTrack(size_t encoder_idx, bool multitrack, const std::string &label)
 {
 	MOQVideoTrack vt;
 	vt.encoder_idx = encoder_idx;
@@ -430,6 +433,7 @@ bool MOQOutput::AddVideoTrack(size_t encoder_idx, bool multitrack)
 		vt.name = video_track_name(encoder_idx, vt.conf);
 		vt.has_alt_group = true;
 		vt.alt_group = (int)encoder_idx + 1;
+		vt.label = label;
 	} else {
 		vt.name = "video";
 	}
@@ -445,10 +449,13 @@ bool MOQOutput::LoadVideoTracks()
 
 	const bool multitrack = !extra_encoders.empty();
 
-	if (!AddVideoTrack(kMainEncoderIdx, multitrack))
+	OBSCanvasAutoRelease main_canvas = obs_get_main_canvas();
+	const char *main_canvas_name = main_canvas ? obs_canvas_get_name(main_canvas) : nullptr;
+
+	if (!AddVideoTrack(kMainEncoderIdx, multitrack, main_canvas_name ? main_canvas_name : ""))
 		return false;
 	for (size_t i = 0; i < extra_encoders.size(); i++) {
-		if (!AddVideoTrack(kFirstExtraEncoderIdx + i, multitrack))
+		if (!AddVideoTrack(kFirstExtraEncoderIdx + i, multitrack, extra_canvas_names[i]))
 			return false;
 	}
 
@@ -529,6 +536,10 @@ moq_media_track_t *MOQOutput::CreateVideoTrack(MOQVideoTrack &vt, moq_media_send
 	tcfg.bitrate = vt.conf.bitrate;
 	tcfg.has_alt_group = vt.has_alt_group;
 	tcfg.alt_group = vt.alt_group;
+	if (!vt.label.empty()) {
+		tcfg.has_label = true;
+		tcfg.label = {(const uint8_t *)vt.label.c_str(), vt.label.size()};
+	}
 
 	moq_media_track_t *new_track = nullptr;
 	moq_result_t result = moq_media_sender_add_track(new_sender, &tcfg, &new_track);

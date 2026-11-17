@@ -5,6 +5,7 @@
 #include <vector>
 
 struct extra_canvas_info {
+	std::string name;
 	video_t *video = nullptr;
 	uint32_t width = 0;
 	uint32_t height = 0;
