@@ -26,6 +26,8 @@ MOQOutput::~MOQOutput()
 	}
 }
 
+static constexpr size_t kMaxNamespaceFields = 32;
+
 static bool IsNamespaceLiteral(int c)
 {
 	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
@@ -91,6 +93,10 @@ bool MOQOutput::SplitNamespace(std::string &error)
 		bool sep = (i == stream_key.size()) || stream_key[i] == '-';
 		if (sep) {
 			if (i > start) {
+				if (ns_bytes.size() == kMaxNamespaceFields) {
+					error = "more than 32 fields";
+					return false;
+				}
 				size_t len = i - start;
 				if (!DecodeNamespaceField(base + start, len, error))
 					return false;
@@ -98,6 +104,10 @@ bool MOQOutput::SplitNamespace(std::string &error)
 			}
 			start = i + 1;
 		}
+	}
+	if (ns_bytes.empty()) {
+		error = "no fields";
+		return false;
 	}
 	namespace_val.parts = ns_bytes.data();
 	namespace_val.count = ns_bytes.size();
