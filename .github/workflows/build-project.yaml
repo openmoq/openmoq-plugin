@@ -308,16 +308,17 @@ jobs:
           path: ${{ github.workspace }}/.ccache
           key: ${{ runner.os }}-${{ matrix.os }}-ccache-x86_64-${{ needs.check-event.outputs.config }}
 
-  # Disabled until libmoq build for Windows is fixed
   windows-build:
     name: Build for Windows 🪟
-    if: false
     runs-on: windows-2022
     needs: check-event
     defaults:
       run:
         shell: pwsh
     steps:
+      - name: Disable CRLF Conversion
+        run: git config --global core.autocrlf false
+
       - uses: actions/checkout@v4
         with:
           submodules: recursive
@@ -337,6 +338,63 @@ jobs:
 
           "pluginName=${ProductName}" >> $env:GITHUB_OUTPUT
           "pluginVersion=${ProductVersion}" >> $env:GITHUB_OUTPUT
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - uses: actions/cache@v4
+        id: vcpkg-cache
+        with:
+          path: ${{ github.workspace }}/.vcpkg-cache
+          key: ${{ runner.os }}-vcpkg-openssl-x64-windows-static-md-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-vcpkg-openssl-x64-windows-static-md-
+
+      - name: Install OpenSSL and pkgconf
+        env:
+          VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.vcpkg-cache
+        run: |
+          # Install OpenSSL and pkgconf
+          if ( $Env:RUNNER_DEBUG -ne $null ) {
+            Set-PSDebug -Trace 1
+          }
+
+          $Triplet = 'x64-windows-static-md'
+          New-Item -ItemType Directory -Force -Path $env:VCPKG_DEFAULT_BINARY_CACHE | Out-Null
+          & "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe" install "openssl:${Triplet}" "pkgconf:${Triplet}"
+          if ( $LASTEXITCODE -ne 0 ) { exit $LASTEXITCODE }
+
+          $Prefix = "$env:VCPKG_INSTALLATION_ROOT/installed/${Triplet}" -replace '\\', '/'
+          if ( -not ( Test-Path "${Prefix}/include/openssl/ssl.h" ) ) { throw 'OpenSSL headers missing' }
+          if ( -not ( Test-Path "${Prefix}/tools/pkgconf/pkgconf.exe" ) ) { throw 'pkgconf missing' }
+          "OPENSSL_ROOT_DIR=${Prefix}" >> $env:GITHUB_ENV
+          "PKG_CONFIG=${Prefix}/tools/pkgconf/pkgconf.exe" >> $env:GITHUB_ENV
+
+      - name: Resolve libmoq Revision
+        id: libmoq-rev
+        shell: bash
+        run: |
+          : Resolve libmoq Revision
+          if [[ "${RUNNER_DEBUG}" ]]; then set -x; fi
+
+          echo "revision=$(.github/scripts/build-libmoq --print-revision)" >> $GITHUB_OUTPUT
+
+      - uses: actions/cache@v4
+        id: libmoq-cache
+        with:
+          path: |
+            ${{ github.workspace }}/.moq-deps/libmoq/prefix
+            ${{ github.workspace }}/.moq-deps/libmoq/picoquic-deps
+          key: ${{ runner.os }}-libmoq-x64-${{ steps.libmoq-rev.outputs.revision }}-${{ hashFiles('.github/scripts/build-libmoq') }}
+
+      - name: Build libmoq 🧩
+        shell: bash
+        run: |
+          : Build libmoq 🧩
+          if [[ "${RUNNER_DEBUG}" ]]; then set -x; fi
+
+          .github/scripts/build-libmoq
 
       - name: Build Plugin 🧱
         uses: ./.github/actions/build-plugin
