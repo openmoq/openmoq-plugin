@@ -20,6 +20,9 @@
 #define AUDIO_GROUP_FRAMES_MAX 1024u
 #define AUDIO_GROUP_DEFAULT_SEC 1u
 
+#define AUDIO_PUBLISHER_PRIORITY 64u
+#define VIDEO_PUBLISHER_PRIORITY 128u
+
 static constexpr size_t kMainEncoderIdx = 0;
 static constexpr size_t kFirstExtraEncoderIdx = 1;
 
@@ -540,6 +543,8 @@ moq_media_track_t *MOQOutput::CreateVideoTrack(MOQVideoTrack &vt, moq_media_send
 		tcfg.has_label = true;
 		tcfg.label = {(const uint8_t *)vt.label.c_str(), vt.label.size()};
 	}
+	tcfg.has_publisher_priority = true;
+	tcfg.publisher_priority = VIDEO_PUBLISHER_PRIORITY;
 
 	moq_media_track_t *new_track = nullptr;
 	moq_result_t result = moq_media_sender_add_track(new_sender, &tcfg, &new_track);
@@ -588,6 +593,8 @@ moq_media_track_t *MOQOutput::CreateAudioTrack(moq_media_sender_t *new_sender)
 	tcfg.samplerate = audio_conf.samplerate;
 	tcfg.channel_config = {(const uint8_t *)audio_conf.channels.c_str(), audio_conf.channels.size()};
 	tcfg.bitrate = audio_conf.bitrate;
+	tcfg.has_publisher_priority = true;
+	tcfg.publisher_priority = AUDIO_PUBLISHER_PRIORITY;
 
 	if (cmaf_enabled) {
 		if (!InitCMAFAudioPackager())
