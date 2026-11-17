@@ -5,6 +5,7 @@
 inline constexpr const char *kSettingSkipTlsVerify = "skip_tls_verify";
 inline constexpr const char *kSettingDraftVersion = "draft_version";
 inline constexpr const char *kSettingContainer = "container";
+inline constexpr const char *kSettingExtraCanvas = "extra_canvas";
 
 inline constexpr const char *kContainerLOC = "loc";
 inline constexpr const char *kContainerCMAF = "cmaf";
