@@ -96,7 +96,16 @@ cp build/obs-moq.so </path/to/obs-install>/lib/x86_64-linux-gnu/obs-plugins/
 
 1. Select the MOQ service in OBS's stream settings.
 2. In the **Server** field, enter the URL of the MOQ relay you want to publish to.
-3. In the **Stream Key** field, enter the MOQ namespace, with each namespace tuple part separated by a dash (`-`). For example, a namespace of `["live", "user123"]` would be entered as `live-user123`.
+3. In the **Stream Key** field, enter the MOQ namespace in MoQT's serialized name form (draft-ietf-moq-transport-18 §1.5): the namespace fields joined by a dash (`-`). The characters `a-z`, `A-Z`, `0-9` and `_` are written as themselves, and any other byte as `.` plus two lowercase hex digits.
+
+| Stream Key | Namespace sent |
+|---|---|
+| `live-user123` | `["live", "user123"]` |
+| `example.2enet-live` | `["example.net", "live"]` |
+| `moq.2dtest-a` | `["moq-test", "a"]` |
+| `live/user123` | rejected: write `/` as `.2f` |
+
+A stream key that is not in this form stops the output before it connects, and the OBS log says how to spell it.
 
 ## Tested against
 

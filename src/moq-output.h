@@ -61,7 +61,7 @@ public:
 
 private:
 	void StartThread();
-	void SplitNamespace();
+	bool SplitNamespace(std::string &error);
 	bool LoadVideoEncoderSettings();
 	bool LoadAudioEncoderSettings();
 	bool InitCMAFVideoPackager();
