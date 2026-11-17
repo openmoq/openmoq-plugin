@@ -48,6 +48,20 @@ function Build {
     Ensure-Location $ProjectRoot
 
     $CmakeArgs = @('--preset', "windows-ci-${Target}")
+
+    # Set by .github/scripts/build-libmoq (via $GITHUB_ENV in CI): libmoq
+    # builds picoquic from source inside this project, and picoquic does not
+    # compile warning-free, same as on Ubuntu and macOS.
+    if ( $env:MOQ_PICOQUIC_SOURCE_DIR ) {
+        $CmakeArgs += @(
+            "-DMOQ_PICOQUIC_SOURCE_DIR=${env:MOQ_PICOQUIC_SOURCE_DIR}"
+            "-DMOQ_PICOTLS_PREFIX=${env:MOQ_PICOTLS_PREFIX}"
+            "-DOPENSSL_ROOT_DIR=${env:OPENSSL_ROOT_DIR}"
+            '-DOPENSSL_USE_STATIC_LIBS=ON'
+            '-DCMAKE_COMPILE_WARNING_AS_ERROR=OFF'
+        )
+    }
+
     $CmakeBuildArgs = @('--build')
     $CmakeInstallArgs = @()
 
