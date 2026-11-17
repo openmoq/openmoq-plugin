@@ -1,14 +1,23 @@
 #pragma once
 #include <obs-module.h>
 #include <string>
+#include <vector>
 
 inline constexpr const char *kSettingSkipTlsVerify = "skip_tls_verify";
 inline constexpr const char *kSettingDraftVersion = "draft_version";
 inline constexpr const char *kSettingContainer = "container";
-inline constexpr const char *kSettingExtraCanvas = "extra_canvas";
+inline constexpr const char *kSettingExtraCanvases = "extra_canvases";
+inline constexpr const char *kSettingExtraCanvasPrefix = "extra_canvas_";
 
 inline constexpr const char *kContainerLOC = "loc";
 inline constexpr const char *kContainerCMAF = "cmaf";
+
+inline std::string ExtraCanvasSettingKey(const std::string &uuid)
+{
+	return kSettingExtraCanvasPrefix + uuid;
+}
+
+std::vector<std::string> UnavailableExtraCanvases(obs_data_t *settings);
 
 class MOQService {
 public:

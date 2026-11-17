@@ -107,22 +107,30 @@ cp build/obs-moq.so </path/to/obs-install>/lib/x86_64-linux-gnu/obs-plugins/
 
 A stream key that is not in this form stops the output before it connects, and the OBS log says how to spell it.
 
-### Multitrack: publishing a second canvas
+### Multitrack: publishing additional canvases
 
-The MOQ service has an **Additional canvas (multitrack)** dropdown listing every
+The MOQ service settings end with **Additional canvases**, a checkbox for every
 canvas OBS has registered.
 
-With **None** (the default), nothing changes: one `video` track, one `audio`
-track, on the stream key as the namespace. Pick a canvas and it is encoded in
-parallel with the main one and published as **two video tracks in one
-broadcast**, which is the common case being the portrait canvas contributed by the
-[Aitum Vertical](https://github.com/Aitum/obs-vertical-canvas) plugin:
+With none checked (the default), nothing changes: one `video` track, one `audio`
+track, on the stream key as the namespace. Each checked canvas is encoded in
+parallel with the main one and published as **another video track in the same
+broadcast**. Canvases come from plugins such as
+[Aitum Vertical](https://github.com/Aitum/obs-vertical-canvas) (one portrait
+canvas) or [Aitum Stream Suite](https://github.com/Aitum/obs-aitum-stream-suite)
+(any number of canvases). Additional tracks are numbered in the order OBS lists
+the canvases:
 
 | Source canvas | Track | altGroup |
 | --- | --- | --- |
 | Main (landscape) | `video_main_1280x720` | 1 |
-| Additional (portrait) | `video_extra_1080x1920` | 2 |
+| Additional 1 (portrait) | `video_extra1_1080x1920` | 2 |
+| Additional 2 (square) | `video_extra2_1080x1080` | 3 |
 | — | `audio` (shared) | — |
+
+Each additional canvas uses a copy of the main video encoder, with the same
+settings and bitrate. OBS allows up to 10 video encoders per output, so at most
+9 additional canvases can be checked.
 
 ## Tested against
 

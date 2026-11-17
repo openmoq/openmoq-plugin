@@ -1,8 +1,6 @@
 #pragma once
 #include <obs-module.h>
 
-#include "extra-canvas.h"
-
 #include <chrono>
 #include <memory>
 #include <mutex>
@@ -97,7 +95,7 @@ private:
 	void SendVideoPacket(MOQVideoTrack &vt, struct encoder_packet *packet);
 	void SendAudioPacket(struct encoder_packet *packet, bool starts_group, bool ends_group);
 	bool ResolveServiceConfig();
-	bool SetupExtraVideo(const char *canvas_uuid);
+	bool SetupExtraVideo(const std::vector<std::string> &canvas_uuids);
 	void ReleaseExtraVideo();
 	obs_encoder_group_t *CreateEncoderGroup();
 	bool LoadEndpointSettings(obs_service_t *service);
@@ -125,8 +123,7 @@ private:
 	std::atomic<bool> running;
 	std::atomic<bool> got_ready;
 
-	obs_encoder_t *extra_encoder = nullptr;
-	extra_canvas_info extra_conf;
+	std::vector<obs_encoder_t *> extra_encoders;
 
 	audio_config audio_conf;
 	endpoint_config endpoint_conf;

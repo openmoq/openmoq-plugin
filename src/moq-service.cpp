@@ -1,6 +1,7 @@
 #include "moq-service.h"
 #include "extra-canvas.h"
 
+#include <algorithm>
 #include <cstring>
 #include <obs.hpp>
 #include <vector>
@@ -28,7 +29,37 @@ void MOQService::Defaults(obs_data_t *settings)
 	obs_data_set_default_bool(settings, kSettingSkipTlsVerify, true);
 	obs_data_set_default_int(settings, kSettingDraftVersion, 0);
 	obs_data_set_default_string(settings, kSettingContainer, kContainerLOC);
-	obs_data_set_default_string(settings, kSettingExtraCanvas, "");
+}
+
+std::vector<std::string> UnavailableExtraCanvases(obs_data_t *settings)
+{
+	std::vector<std::string> registered;
+	for (const extra_canvas_entry &entry : extra_canvas_list())
+		registered.push_back(entry.uuid);
+
+	std::vector<std::string> uuids;
+	const size_t prefix_len = strlen(kSettingExtraCanvasPrefix);
+	for (obs_data_item_t *item = obs_data_first(settings); item; obs_data_item_next(&item)) {
+		const char *name = obs_data_item_get_name(item);
+		if (strncmp(name, kSettingExtraCanvasPrefix, prefix_len) != 0 || !obs_data_item_get_bool(item))
+			continue;
+		if (std::find(registered.begin(), registered.end(), name + prefix_len) == registered.end())
+			uuids.push_back(name + prefix_len);
+	}
+	return uuids;
+}
+
+static bool add_unavailable_extra_canvases(obs_properties_t *props, obs_property_t *, obs_data_t *settings)
+{
+	bool added = false;
+	for (const std::string &uuid : UnavailableExtraCanvases(settings)) {
+		const std::string key = ExtraCanvasSettingKey(uuid);
+		if (obs_properties_get(props, key.c_str()))
+			continue;
+		obs_properties_add_bool(props, key.c_str(), obs_module_text("Service.ExtraCanvas.Unavailable"));
+		added = true;
+	}
+	return added;
 }
 
 obs_properties_t *MOQService::Properties()
@@ -37,14 +68,6 @@ obs_properties_t *MOQService::Properties()
 
 	obs_properties_add_text(ppts, "server", obs_module_text("Service.Server"), OBS_TEXT_DEFAULT);
 	obs_properties_add_text(ppts, "key", obs_module_text("Service.Namespace"), OBS_TEXT_DEFAULT);
-
-	obs_property_t *extra = obs_properties_add_list(ppts, kSettingExtraCanvas,
-							obs_module_text("Service.ExtraCanvas"), OBS_COMBO_TYPE_LIST,
-							OBS_COMBO_FORMAT_STRING);
-	obs_property_list_add_string(extra, obs_module_text("Service.ExtraCanvas.None"), "");
-	for (const extra_canvas_entry &entry : extra_canvas_list())
-		obs_property_list_add_string(extra, entry.name.c_str(), entry.uuid.c_str());
-	obs_property_set_long_description(extra, obs_module_text("Service.ExtraCanvas.Desc"));
 
 	obs_property_t *skip_tls =
 		obs_properties_add_bool(ppts, kSettingSkipTlsVerify, obs_module_text("Service.SkipTlsVerify"));
@@ -67,6 +90,15 @@ obs_properties_t *MOQService::Properties()
 	obs_property_list_add_string(container, "LOC", kContainerLOC);
 	obs_property_list_add_string(container, "CMAF", kContainerCMAF);
 	obs_property_set_long_description(container, obs_module_text("Service.Container.Desc"));
+
+	const std::vector<extra_canvas_entry> canvases = extra_canvas_list();
+	obs_property_t *extra = obs_properties_add_text(ppts, kSettingExtraCanvases,
+							obs_module_text("Service.ExtraCanvas"), OBS_TEXT_INFO);
+	obs_property_set_long_description(extra, obs_module_text(canvases.empty() ? "Service.ExtraCanvas.None"
+										  : "Service.ExtraCanvas.Desc"));
+	obs_property_set_modified_callback(extra, add_unavailable_extra_canvases);
+	for (const extra_canvas_entry &entry : canvases)
+		obs_properties_add_bool(ppts, ExtraCanvasSettingKey(entry.uuid).c_str(), entry.name.c_str());
 
 	return ppts;
 }

@@ -3,6 +3,7 @@
 #include "codec-signaling.h"
 #include "moq-service.h"
 #include "moq-cmaf.h"
+#include "extra-canvas.h"
 
 #include <util/platform.h>
 #include <obs.hpp>
@@ -20,7 +21,7 @@
 #define AUDIO_GROUP_DEFAULT_SEC 1u
 
 static constexpr size_t kMainEncoderIdx = 0;
-static constexpr size_t kExtraEncoderIdx = 1;
+static constexpr size_t kFirstExtraEncoderIdx = 1;
 
 MOQOutput::MOQOutput(obs_data_t *settings, obs_output_t *output) : output(output)
 {
@@ -143,10 +144,14 @@ bool MOQOutput::LoadVideoEncoderSettings(MOQVideoTrack &vt)
 	vt.conf.video_width = obs_encoder_get_width(venc);
 	vt.conf.video_height = obs_encoder_get_height(venc);
 
-	struct obs_video_info ovi = {};
-	obs_get_video_info(&ovi);
-	vt.conf.fps_num = ovi.fps_num;
-	vt.conf.fps_den = ovi.fps_den;
+	const struct video_output_info *voi = video_output_get_info(obs_encoder_video(venc));
+	if (!voi) {
+		blog(LOG_WARNING, "[obs-moq] video encoder at index %zu has no video", vt.encoder_idx);
+		obs_output_set_last_error(output, obs_module_text("Error.NoVideoEncoder"));
+		return false;
+	}
+	vt.conf.fps_num = voi->fps_num;
+	vt.conf.fps_den = voi->fps_den;
 
 	uint8_t *extra = nullptr;
 	size_t extra_size = 0;
@@ -289,77 +294,101 @@ bool MOQOutput::InitCMAFAudioPackager()
 	return true;
 }
 
-static std::string read_extra_canvas_uuid(obs_service_t *service)
+static std::vector<std::string> read_extra_canvas_uuids(obs_service_t *service)
 {
+	std::vector<std::string> uuids;
 	if (!service)
-		return {};
+		return uuids;
 
 	OBSDataAutoRelease settings = obs_service_get_settings(service);
 	if (!settings)
-		return {};
+		return uuids;
 
-	const char *uuid = obs_data_get_string(settings, kSettingExtraCanvas);
-	return uuid ? uuid : "";
+	for (const extra_canvas_entry &entry : extra_canvas_list()) {
+		if (obs_data_get_bool(settings, ExtraCanvasSettingKey(entry.uuid).c_str()))
+			uuids.push_back(entry.uuid);
+	}
+
+	const std::vector<std::string> unavailable = UnavailableExtraCanvases(settings);
+	uuids.insert(uuids.end(), unavailable.begin(), unavailable.end());
+	return uuids;
 }
 
-bool MOQOutput::SetupExtraVideo(const char *canvas_uuid)
+bool MOQOutput::SetupExtraVideo(const std::vector<std::string> &canvas_uuids)
 {
-	if (!extra_canvas_resolve(canvas_uuid, &extra_conf)) {
-		blog(LOG_WARNING, "[obs-moq] the configured extra canvas could not be resolved");
-		obs_output_set_last_error(output, obs_module_text("Error.NoExtraCanvas"));
-		extra_conf = {};
+	const size_t max_extra = MAX_OUTPUT_VIDEO_ENCODERS - kFirstExtraEncoderIdx;
+	if (canvas_uuids.size() > max_extra) {
+		blog(LOG_WARNING, "[obs-moq] %zu extra canvases selected, an output fits at most %zu",
+		     canvas_uuids.size(), max_extra);
+		obs_output_set_last_error(output, obs_module_text("Error.TooManyExtraCanvases"));
 		return false;
+	}
+
+	std::vector<extra_canvas_info> canvases;
+	for (const std::string &uuid : canvas_uuids) {
+		extra_canvas_info canvas;
+		if (!extra_canvas_resolve(uuid.c_str(), &canvas)) {
+			blog(LOG_WARNING, "[obs-moq] the configured extra canvas %s could not be resolved",
+			     uuid.c_str());
+			obs_output_set_last_error(output, obs_module_text("Error.NoExtraCanvas"));
+			return false;
+		}
+		canvases.push_back(canvas);
 	}
 
 	obs_encoder_t *main_encoder = obs_output_get_video_encoder(output);
 	if (!main_encoder) {
 		blog(LOG_WARNING, "[obs-moq] no video encoder assigned");
 		obs_output_set_last_error(output, obs_module_text("Error.NoVideoEncoder"));
-		extra_conf = {};
 		return false;
 	}
 
 	const char *enc_id = obs_encoder_get_id(main_encoder);
 	OBSDataAutoRelease settings = obs_encoder_get_settings(main_encoder);
 
-	obs_encoder_t *venc = obs_video_encoder_create(enc_id, "moq_extra_video", settings, nullptr);
-	if (!venc) {
-		blog(LOG_WARNING, "[obs-moq] failed to create the extra video encoder '%s'", enc_id);
-		obs_output_set_last_error(output, obs_module_text("Error.NoVideoEncoder"));
-		extra_conf = {};
-		return false;
+	for (const extra_canvas_info &canvas : canvases) {
+		const size_t encoder_idx = kFirstExtraEncoderIdx + extra_encoders.size();
+		const std::string name = "moq_extra_video_" + std::to_string(encoder_idx);
+		obs_encoder_t *venc = obs_video_encoder_create(enc_id, name.c_str(), settings, nullptr);
+		if (!venc) {
+			blog(LOG_WARNING, "[obs-moq] failed to create the extra video encoder '%s'", enc_id);
+			obs_output_set_last_error(output, obs_module_text("Error.NoVideoEncoder"));
+			return false;
+		}
+
+		obs_encoder_set_video(venc, canvas.video);
+		extra_encoders.push_back(venc);
 	}
 
-	obs_encoder_set_video(venc, extra_conf.video);
+	for (size_t i = 0; i < extra_encoders.size(); i++) {
+		const size_t encoder_idx = kFirstExtraEncoderIdx + i;
+		obs_output_set_video_encoder2(output, extra_encoders[i], encoder_idx);
 
-	extra_encoder = venc;
-	obs_output_set_video_encoder2(output, venc, kExtraEncoderIdx);
-
-	blog(LOG_INFO, "[obs-moq] extra canvas %ux%u @ %.3f fps attached to encoder slot %zu (cloned '%s')",
-	     extra_conf.width, extra_conf.height, (double)extra_conf.fps_num / (double)extra_conf.fps_den,
-	     kExtraEncoderIdx, enc_id);
+		blog(LOG_INFO, "[obs-moq] extra canvas %ux%u @ %.3f fps attached to encoder slot %zu (cloned '%s')",
+		     canvases[i].width, canvases[i].height, (double)canvases[i].fps_num / (double)canvases[i].fps_den,
+		     encoder_idx, enc_id);
+	}
 	return true;
 }
 
 void MOQOutput::ReleaseExtraVideo()
 {
-	extra_conf = {};
-
-	if (!obs_output_active(output))
-		obs_output_set_video_encoder2(output, nullptr, kExtraEncoderIdx);
-
-	if (extra_encoder) {
-		obs_encoder_release(extra_encoder);
-		extra_encoder = nullptr;
+	if (!obs_output_active(output)) {
+		for (size_t idx = kFirstExtraEncoderIdx; idx < MAX_OUTPUT_VIDEO_ENCODERS; idx++)
+			obs_output_set_video_encoder2(output, nullptr, idx);
 	}
+
+	for (obs_encoder_t *venc : extra_encoders)
+		obs_encoder_release(venc);
+	extra_encoders.clear();
 }
 
 obs_encoder_group_t *MOQOutput::CreateEncoderGroup()
 {
-	if (!extra_encoder)
+	if (extra_encoders.empty())
 		return nullptr;
 
-	// Attempt to coordinate the two encoders startup
+	// Attempt to coordinate the encoders startup
 	obs_encoder_group_t *group = obs_encoder_group_create();
 	if (!group)
 		return nullptr;
@@ -367,13 +396,15 @@ obs_encoder_group_t *MOQOutput::CreateEncoderGroup()
 	if (!obs_encoder_set_group(obs_output_get_video_encoder(output), group))
 		blog(LOG_WARNING, "[obs-moq] main encoder could not join the group; "
 				  "canvas start times will not be aligned");
-	obs_encoder_set_group(extra_encoder, group);
+	for (obs_encoder_t *venc : extra_encoders)
+		obs_encoder_set_group(venc, group);
 	return group;
 }
 
 static std::string video_track_name(size_t encoder_idx, const video_config &conf)
 {
-	const char *role = encoder_idx == kExtraEncoderIdx ? "video_extra_" : "video_main_";
+	const std::string role = encoder_idx == kMainEncoderIdx ? "video_main_"
+								: "video_extra" + std::to_string(encoder_idx) + "_";
 	return role + std::to_string(conf.video_width) + "x" + std::to_string(conf.video_height);
 }
 
@@ -412,12 +443,14 @@ bool MOQOutput::LoadVideoTracks()
 {
 	video_tracks.clear();
 
-	const bool multitrack = extra_conf.video != nullptr;
+	const bool multitrack = !extra_encoders.empty();
 
 	if (!AddVideoTrack(kMainEncoderIdx, multitrack))
 		return false;
-	if (multitrack && !AddVideoTrack(kExtraEncoderIdx, multitrack))
-		return false;
+	for (size_t i = 0; i < extra_encoders.size(); i++) {
+		if (!AddVideoTrack(kFirstExtraEncoderIdx + i, multitrack))
+			return false;
+	}
 
 	return !video_tracks.empty();
 }
@@ -683,9 +716,10 @@ bool MOQOutput::Start()
 
 	ReleaseExtraVideo();
 
-	const std::string extra_canvas_uuid = read_extra_canvas_uuid(obs_output_get_service(output));
-	if (!extra_canvas_uuid.empty() && !SetupExtraVideo(extra_canvas_uuid.c_str())) {
+	const std::vector<std::string> extra_canvas_uuids = read_extra_canvas_uuids(obs_output_get_service(output));
+	if (!extra_canvas_uuids.empty() && !SetupExtraVideo(extra_canvas_uuids)) {
 		blog(LOG_ERROR, "[obs-moq] cannot start requested extra video");
+		ReleaseExtraVideo();
 		return false;
 	}
 
