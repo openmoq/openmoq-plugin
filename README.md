@@ -23,11 +23,18 @@ Until that PR is merged, you'll need to build OBS Studio from that PR's branch/f
 
 This plugin links against libmoq's CMAF packager (`moq::cmaf-packager`). It is part of openmoq/moq5 `main`, but it is not built by default: libmoq has to be configured with `-DMOQ_BUILD_CMAF_PACKAGER=ON`, as in the build steps below.
 
-The revision CI builds against is pinned in [`.github/scripts/.libmoq-version`](.github/scripts/.libmoq-version), currently `main`.
+The revision CI builds against is pinned in [`.github/scripts/.libmoq-version`](.github/scripts/.libmoq-version): an openmoq/moq5 `main` revision with draft-22 support.
 
 ### Building libmoq (openmoq/moq5)
 
 This plugin links against libmoq (openmoq/moq5) (`find_package(libmoq REQUIRED COMPONENTS service)`). libmoq must be built and installed on the system **before** configuring this plugin.
+
+```bash
+git clone https://github.com/openmoq/moq5.git
+cd moq5
+```
+
+Then follow the build steps below from that checkout.
 
 #### 1. Build and install libmoq
 
