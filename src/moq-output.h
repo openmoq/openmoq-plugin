@@ -46,6 +46,26 @@ struct endpoint_config {
 	moq_version_t draft_version = (moq_version_t)0; // 0 : negotiate automatically
 };
 
+struct MOQVideoTrack {
+	size_t encoder_idx = 0;
+	std::string name;
+
+	bool has_alt_group = false;
+	int alt_group = 0;
+
+	video_config conf = {};
+	std::vector<uint8_t> init_data;
+	std::string codec;
+	const TrackCodec *track_codec = nullptr;
+
+	std::string label;
+
+	CMAFPackagerPtr packager;
+	uint32_t sample_duration = 0;
+
+	moq_media_track_t *track = nullptr;
+};
+
 class MOQOutput {
 public:
 	MOQOutput(obs_data_t *settings, obs_output_t *output);
@@ -62,16 +82,24 @@ public:
 private:
 	void StartThread();
 	bool SplitNamespace(std::string &error);
-	bool LoadVideoEncoderSettings();
+	bool LoadVideoTracks();
+	bool AddVideoTrack(size_t encoder_idx, bool multitrack, const std::string &label);
+	bool LoadVideoEncoderSettings(MOQVideoTrack &vt);
 	bool LoadAudioEncoderSettings();
-	bool InitCMAFVideoPackager();
+	bool InitCMAFVideoPackager(MOQVideoTrack &vt);
 	bool InitCMAFAudioPackager();
-	moq_media_track_t *CreateVideoTrack(moq_media_sender_t *new_sender);
-	moq_media_track_t *CreateVideoTrackFromPacket(moq_media_sender_t *cur_sender, struct encoder_packet *packet);
+	moq_media_track_t *CreateVideoTrack(MOQVideoTrack &vt, moq_media_sender_t *new_sender);
+	moq_media_track_t *CreateVideoTrackFromPacket(MOQVideoTrack &vt, moq_media_sender_t *cur_sender,
+						      struct encoder_packet *packet);
 	moq_media_track_t *CreateAudioTrack(moq_media_sender_t *new_sender);
-	void SendPacket(struct encoder_packet *packet, moq_media_track_t **track, bool is_sync, bool starts_group,
-			bool ends_group);
+	void WriteMediaObject(moq_media_track_t *track, struct encoder_packet *packet, const uint8_t *data, size_t size,
+			      bool is_sync, bool starts_group, bool ends_group);
+	void SendVideoPacket(MOQVideoTrack &vt, struct encoder_packet *packet);
+	void SendAudioPacket(struct encoder_packet *packet, bool starts_group, bool ends_group);
 	bool ResolveServiceConfig();
+	bool SetupExtraVideo(const std::vector<std::string> &canvas_uuids);
+	void ReleaseExtraVideo();
+	obs_encoder_group_t *CreateEncoderGroup();
 	bool LoadEndpointSettings(obs_service_t *service);
 	void LoadContainerSettings(obs_service_t *service);
 	void ResolveAudioGroupFrames(obs_encoder_t *aenc);
@@ -97,13 +125,11 @@ private:
 	std::atomic<bool> running;
 	std::atomic<bool> got_ready;
 
-	video_config video_conf;
+	std::vector<obs_encoder_t *> extra_encoders;
+	std::vector<std::string> extra_canvas_names;
+
 	audio_config audio_conf;
 	endpoint_config endpoint_conf;
-
-	std::vector<uint8_t> video_init_data;
-	std::string video_codec;
-	const TrackCodec *video_track_codec = nullptr;
 
 	std::vector<uint8_t> audio_init_data;
 	std::string audio_codec;
@@ -116,7 +142,7 @@ private:
 	std::vector<moq_bytes_t> ns_bytes;
 
 	moq_media_sender_t *sender = nullptr;
-	moq_media_track_t *video_track = nullptr;
+	std::vector<MOQVideoTrack> video_tracks;
 	moq_media_track_t *audio_track = nullptr;
 
 	bool cmaf_enabled = false;
@@ -124,9 +150,7 @@ private:
 	uint32_t audio_group_frames = 0;
 	uint32_t audio_group_sent = 0;
 
-	CMAFPackagerPtr video_packager;
 	CMAFPackagerPtr audio_packager;
-	uint32_t video_sample_duration = 0;
 	std::vector<uint8_t> cmaf_scratch;
 };
 
